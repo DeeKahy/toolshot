@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>toolshot overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.15);
+      cursor: crosshair;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: -apple-system, "Segoe UI", sans-serif;
+    }
+    #highlight {
+      position: fixed;
+      display: none;
+      border: 2px solid #4da3ff;
+      background: rgba(77, 163, 255, 0.18);
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    #label {
+      position: fixed;
+      display: none;
+      background: rgba(20, 20, 24, 0.92);
+      color: #eee;
+      font-size: 12px;
+      line-height: 1.4;
+      padding: 5px 9px;
+      border-radius: 6px;
+      pointer-events: none;
+      max-width: 420px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #label .dims { color: #9ab; }
+    #hint {
+      position: fixed;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 24, 0.85);
+      color: #ddd;
+      font-size: 13px;
+      padding: 7px 14px;
+      border-radius: 8px;
+      pointer-events: none;
+    }
+    #hint kbd {
+      background: #333;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="highlight"></div>
+  <div id="label"></div>
+  <div id="hint">Click a window to capture it &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel</div>
+  <script>
+    const invoke = window.__TAURI__.core.invoke;
+    const highlight = document.getElementById("highlight");
+    const label = document.getElementById("label");
+
+    let windows = [];
+    let current = null;
+    let done = false;
+
+    invoke("list_windows")
+      .then((list) => { windows = list; })
+      .catch((e) => console.error("list_windows failed", e));
+
+    function windowAt(x, y) {
+      // The list arrives sorted topmost first, so the first hit wins.
+      for (const w of windows) {
+        if (x >= w.x && x < w.x + w.width && y >= w.y && y < w.y + w.height) {
+          return w;
+        }
+      }
+      return null;
+    }
+
+    document.addEventListener("mousemove", (e) => {
+      const w = windowAt(e.clientX, e.clientY);
+      current = w;
+      if (!w) {
+        highlight.style.display = "none";
+        label.style.display = "none";
+        return;
+      }
+      highlight.style.display = "block";
+      highlight.style.left = w.x + "px";
+      highlight.style.top = w.y + "px";
+      highlight.style.width = w.width + "px";
+      highlight.style.height = w.height + "px";
+
+      const name = w.title ? w.app_name + ": " + w.title : w.app_name;
+      label.innerHTML = "";
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = name + "  ";
+      const dims = document.createElement("span");
+      dims.className = "dims";
+      dims.textContent = w.width + "×" + w.height;
+      label.appendChild(nameSpan);
+      label.appendChild(dims);
+      label.style.display = "block";
+      label.style.left = Math.max(6, w.x + 8) + "px";
+      label.style.top = Math.max(6, w.y - 30) + "px";
+    });
+
+    document.addEventListener("mousedown", () => {
+      if (done || !current) return;
+      done = true;
+      invoke("capture_window", { id: current.id }).catch((e) => {
+        console.error("capture failed", e);
+        done = false;
+      });
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") invoke("cancel_overlay");
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+[package]
+name = "toolshot"
+version = "0.1.0"
+description = "Tray screenshot tool with annotations, color picking and screen overlays"
+authors = ["deekahy"]
+edition = "2021"
+
+[lib]
+name = "toolshot_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+xcap = "0.9"
+arboard = "3"
+base64 = "0.22"
