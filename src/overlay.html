@@ -41,7 +41,7 @@
     #label .dims { color: #9ab; }
     #hint {
       position: fixed;
-      top: 14px;
+      top: 56px;
       left: 50%;
       transform: translateX(-50%);
       background: rgba(20, 20, 24, 0.85);
@@ -51,30 +51,86 @@
       border-radius: 8px;
       pointer-events: none;
     }
-    #hint kbd {
+    #hint kbd, #notice kbd {
       background: #333;
       border-radius: 4px;
       padding: 1px 5px;
       font-size: 12px;
+    }
+    #notice {
+      position: fixed;
+      display: none;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(20, 20, 24, 0.95);
+      color: #ddd;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 18px 24px;
+      border-radius: 10px;
+      border: 1px solid #444;
+      max-width: 480px;
+      text-align: center;
+      pointer-events: none;
+    }
+    #notice h2 {
+      font-size: 15px;
+      margin-bottom: 8px;
+      color: #fff;
     }
   </style>
 </head>
 <body>
   <div id="highlight"></div>
   <div id="label"></div>
-  <div id="hint">Click a window to capture it &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel</div>
+  <div id="hint">Click a window to capture it &nbsp;&middot;&nbsp; <kbd>Esc</kbd> or click empty space to cancel</div>
+  <div id="notice"></div>
   <script>
     const invoke = window.__TAURI__.core.invoke;
     const highlight = document.getElementById("highlight");
     const label = document.getElementById("label");
+    const notice = document.getElementById("notice");
 
     let windows = [];
     let current = null;
     let done = false;
 
-    invoke("list_windows")
-      .then((list) => { windows = list; })
-      .catch((e) => console.error("list_windows failed", e));
+    function showNotice(title, body) {
+      notice.innerHTML = "";
+      const h = document.createElement("h2");
+      h.textContent = title;
+      const p = document.createElement("div");
+      p.innerHTML = body;
+      notice.appendChild(h);
+      notice.appendChild(p);
+      notice.style.display = "block";
+    }
+
+    async function init() {
+      const granted = await invoke("check_screen_permission").catch(() => false);
+      if (!granted) {
+        showNotice(
+          "Screen Recording permission needed",
+          "Enable it in System Settings &rarr; Privacy &amp; Security &rarr; " +
+          "Screen &amp; System Audio Recording, then restart Toolshot.<br>" +
+          "When running the raw binary from a terminal, the permission " +
+          "belongs to the terminal app.<br><br>" +
+          "<kbd>Esc</kbd> or click to close"
+        );
+        return;
+      }
+      try {
+        windows = await invoke("list_windows");
+      } catch (e) {
+        showNotice("Could not list windows", String(e) + "<br><br><kbd>Esc</kbd> or click to close");
+        return;
+      }
+      if (windows.length === 0) {
+        showNotice("No windows to capture", "<kbd>Esc</kbd> or click to close");
+      }
+    }
+    init();
 
     function windowAt(x, y) {
       // The list arrives sorted topmost first, so the first hit wins.
@@ -114,14 +170,20 @@
       label.style.top = Math.max(6, w.y - 30) + "px";
     });
 
-    document.addEventListener("mousedown", () => {
-      if (done || !current) return;
+    document.addEventListener("mousedown", (e) => {
+      if (done) return;
+      if (e.button !== 0 || !current) {
+        invoke("cancel_overlay");
+        return;
+      }
       done = true;
-      invoke("capture_window", { id: current.id }).catch((e) => {
-        console.error("capture failed", e);
+      invoke("capture_window", { id: current.id }).catch((err) => {
+        console.error("capture failed", err);
         done = false;
       });
     });
+
+    document.addEventListener("contextmenu", (e) => e.preventDefault());
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") invoke("cancel_overlay");

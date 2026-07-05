@@ -27,6 +27,44 @@ pub struct WindowInfo {
     pub z: i32,
 }
 
+#[cfg(target_os = "macos")]
+mod screen_access {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+
+    pub fn granted() -> bool {
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+
+    // Triggers the system prompt on first call, afterwards the user has to
+    // flip the switch in System Settings themselves.
+    pub fn request() -> bool {
+        unsafe { CGRequestScreenCaptureAccess() }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod screen_access {
+    pub fn granted() -> bool {
+        true
+    }
+
+    pub fn request() -> bool {
+        true
+    }
+}
+
+#[tauri::command]
+pub fn check_screen_permission() -> bool {
+    if screen_access::granted() {
+        return true;
+    }
+    screen_access::request()
+}
+
 // System surfaces that make no sense as click-to-capture targets.
 const EXCLUDED_APPS: &[&str] = &[
     "Window Server",
@@ -71,8 +109,13 @@ pub fn start_window_pick(app: &AppHandle) {
         .focused(true)
         .build();
 
-    if let Err(e) = result {
-        eprintln!("failed to open overlay: {e}");
+    match result {
+        // Accessory apps do not activate on their own, without this the
+        // overlay never sees keyboard events and Esc does nothing.
+        Ok(window) => {
+            let _ = window.set_focus();
+        }
+        Err(e) => eprintln!("failed to open overlay: {e}"),
     }
 }
 
@@ -177,8 +220,11 @@ fn open_editor(app: &AppHandle, img_width: u32, img_height: u32) {
         .focused(true)
         .build();
 
-    if let Err(e) = result {
-        eprintln!("failed to open editor: {e}");
+    match result {
+        Ok(window) => {
+            let _ = window.set_focus();
+        }
+        Err(e) => eprintln!("failed to open editor: {e}"),
     }
 }
 

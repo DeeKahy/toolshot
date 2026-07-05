@@ -5,6 +5,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(capture::CaptureState::default())
         .invoke_handler(tauri::generate_handler![
+            capture::check_screen_permission,
             capture::list_windows,
             capture::capture_window,
             capture::cancel_overlay,
