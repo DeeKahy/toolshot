@@ -93,4 +93,4 @@ Toolshot checks for updates only when you ask it to: Settings, "Check for update
 
 ## License
 
-MIT
+GPL-3.0. You can do what you want with it as long as derivatives stay open. If you find it useful, donations are welcome.

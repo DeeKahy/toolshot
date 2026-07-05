@@ -3,6 +3,7 @@ name = "toolshot"
 version = "0.1.0"
 description = "Tray screenshot tool with annotations, color picking and screen overlays"
 authors = ["deekahy"]
+license = "GPL-3.0-only"
 edition = "2021"
 
 [lib]
