@@ -26,6 +26,8 @@
       position: fixed;
       inset: 0;
       background: rgba(0, 0, 0, 0.15);
+      /* Hidden until the overlay learns its mode, the picker never dims. */
+      display: none;
     }
     #highlight {
       position: fixed;
@@ -184,7 +186,9 @@
     let screen = null;         // { canvas, ctx, scale } of the frozen frame
     let dragStart = null;
     let dragging = false;
-    let mode = "capture";      // "capture" or "pick" (color picker)
+    // null until the backend answers, input is ignored before that so
+    // capture-mode visuals can never leak into picker mode.
+    let mode = null;           // "capture" or "pick" (color picker)
     const hint = document.getElementById("hint");
 
     function showNotice(title, body) {
@@ -202,8 +206,9 @@
       mode = await invoke("get_overlay_mode").catch(() => "capture");
       if (mode === "pick") {
         // The frozen frame shows through untinted, the screen looks normal.
-        dim.style.display = "none";
         hint.innerHTML = 'Click to pick a color &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel';
+      } else {
+        dim.style.display = "block";
       }
 
       const granted = await invoke("check_screen_permission").catch(() => false);
@@ -397,6 +402,7 @@
     }
 
     document.addEventListener("mousemove", (e) => {
+      if (!mode) return;
       const x = e.clientX, y = e.clientY;
       if (mode === "pick") {
         updateLoupe(x, y);
@@ -423,7 +429,7 @@
     });
 
     document.addEventListener("mousedown", (e) => {
-      if (done) return;
+      if (done || !mode) return;
       if (e.button !== 0) {
         invoke("cancel_overlay");
         return;
@@ -444,7 +450,7 @@
     });
 
     document.addEventListener("mouseup", (e) => {
-      if (done || e.button !== 0 || !dragStart) return;
+      if (done || !mode || e.button !== 0 || !dragStart) return;
 
       if (dragging) {
         const x = Math.min(dragStart.x, e.clientX);
