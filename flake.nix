@@ -33,6 +33,33 @@
             pkgs.pipewire
           ];
           doCheck = false;
+
+          # A real .app bundle so Spotlight and Launchpad can find it.
+          postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            app="$out/Applications/Toolshot.app/Contents"
+            mkdir -p "$app/MacOS" "$app/Resources"
+            cp "$out/bin/toolshot" "$app/MacOS/toolshot"
+            cp ${./src-tauri/icons/icon.icns} "$app/Resources/icon.icns"
+            cat > "$app/Info.plist" <<'EOF'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleName</key><string>Toolshot</string>
+              <key>CFBundleDisplayName</key><string>Toolshot</string>
+              <key>CFBundleIdentifier</key><string>dev.deekahy.toolshot</string>
+              <key>CFBundleExecutable</key><string>toolshot</string>
+              <key>CFBundleVersion</key><string>0.1.0</string>
+              <key>CFBundleShortVersionString</key><string>0.1.0</string>
+              <key>CFBundleIconFile</key><string>icon.icns</string>
+              <key>LSMinimumSystemVersion</key><string>11.0</string>
+              <key>LSUIElement</key><true/>
+              <key>NSHighResolutionCapable</key><true/>
+            </dict>
+            </plist>
+            EOF
+          '';
         };
       });
 
