@@ -18,7 +18,7 @@ pub fn run() {
             capture::capture_area,
             capture::cancel_overlay,
             capture::get_capture_png,
-            capture::copy_capture,
+            capture::copy_annotated,
             capture::close_editor,
             picker::pick_color,
             picker::get_picked_color,

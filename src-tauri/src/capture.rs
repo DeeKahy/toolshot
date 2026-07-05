@@ -6,15 +6,9 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use xcap::image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use xcap::image::{ExtendedColorType, ImageEncoder};
 
-pub struct Capture {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-    pub png: Vec<u8>,
-}
-
+// The finished capture, PNG-encoded, waiting for the editor to display it.
 #[derive(Default)]
-pub struct CaptureState(pub Mutex<Option<Capture>>);
+pub struct CaptureState(pub Mutex<Option<Vec<u8>>>);
 
 // Full-screen frame grabbed the moment the overlay opens. Area selection
 // crops from this so the pixels cannot change mid drag, and the magnifier
@@ -287,7 +281,7 @@ pub fn capture_window(
     let rgba = image.into_raw();
     let png = encode_png(&rgba, width, height)?;
 
-    *state.0.lock().unwrap() = Some(Capture { width, height, rgba, png });
+    *state.0.lock().unwrap() = Some(png);
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
@@ -355,12 +349,7 @@ pub fn capture_area(
     };
 
     let png = encode_png(&crop_rgba, crop_w, crop_h)?;
-    *capture.0.lock().unwrap() = Some(Capture {
-        width: crop_w,
-        height: crop_h,
-        rgba: crop_rgba,
-        png,
-    });
+    *capture.0.lock().unwrap() = Some(png);
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
@@ -411,25 +400,36 @@ pub fn cancel_overlay(app: AppHandle) {
 #[tauri::command]
 pub fn get_capture_png(state: State<'_, CaptureState>) -> Result<String, String> {
     let guard = state.0.lock().unwrap();
-    let capture = guard.as_ref().ok_or_else(|| "no capture available".to_string())?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&capture.png))
+    let png = guard.as_ref().ok_or_else(|| "no capture available".to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
+// The editor sends the composited canvas (image plus annotations) as one
+// raw payload: width and height as little endian u32s, then RGBA bytes.
 #[tauri::command]
-pub fn copy_capture(app: AppHandle, state: State<'_, CaptureState>) -> Result<(), String> {
-    {
-        let guard = state.0.lock().unwrap();
-        let capture = guard.as_ref().ok_or_else(|| "no capture available".to_string())?;
-
-        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-        clipboard
-            .set_image(arboard::ImageData {
-                width: capture.width as usize,
-                height: capture.height as usize,
-                bytes: capture.rgba.as_slice().into(),
-            })
-            .map_err(|e| e.to_string())?;
+pub fn copy_annotated(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw payload".to_string());
+    };
+    if bytes.len() < 8 {
+        return Err("payload too short".to_string());
     }
+
+    let width = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+    let height = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let rgba = &bytes[8..];
+    if rgba.len() != width * height * 4 {
+        return Err("payload size mismatch".to_string());
+    }
+
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width,
+            height,
+            bytes: rgba.into(),
+        })
+        .map_err(|e| e.to_string())?;
 
     if let Some(editor) = app.get_webview_window("editor") {
         let _ = editor.close();

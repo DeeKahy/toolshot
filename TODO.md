@@ -24,13 +24,15 @@ Working list of everything planned. Items get checked off as they land.
 
 ## Editor
 
-- [ ] Rectangle tool
-- [ ] Arrow tool
+- [x] Rectangle tool (drag to draw, click tool again to disarm)
+- [x] Arrow tool with filled head
+- [x] Annotation color swatch in the toolbar
+- [x] Undo (Cmd+Z), copies always include annotations
+- [ ] Redo
 - [ ] Freeform pen tool
 - [ ] Text tool
 - [ ] Blur and blackout tool for hiding sensitive info
 - [ ] Color picker that samples pixels from the screenshot
-- [ ] Undo / redo
 - [ ] Crop
 - [ ] Save to file (Cmd+S) with configurable folder and filename template
 - [ ] Step number badges: auto-incrementing 1, 2, 3 stamps for guides
