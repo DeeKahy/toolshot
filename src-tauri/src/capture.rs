@@ -30,6 +30,20 @@ pub struct FrozenScreen {
 #[derive(Default)]
 pub struct ScreenState(pub Mutex<Option<FrozenScreen>>);
 
+// What the overlay is currently being used for: "capture" or "pick".
+pub struct OverlayMode(pub Mutex<String>);
+
+impl Default for OverlayMode {
+    fn default() -> Self {
+        OverlayMode(Mutex::new("capture".to_string()))
+    }
+}
+
+#[tauri::command]
+pub fn get_overlay_mode(state: State<'_, OverlayMode>) -> String {
+    state.0.lock().unwrap().clone()
+}
+
 #[derive(Serialize)]
 pub struct ScreenMeta {
     pub width: u32,
@@ -137,10 +151,20 @@ const EXCLUDED_APPS: &[&str] = &[
 ];
 
 pub fn start_window_pick(app: &AppHandle) {
+    open_overlay(app, "capture");
+}
+
+pub fn start_color_pick(app: &AppHandle) {
+    open_overlay(app, "pick");
+}
+
+fn open_overlay(app: &AppHandle, mode: &str) {
     if let Some(existing) = app.get_webview_window("overlay") {
         let _ = existing.close();
         return;
     }
+
+    *app.state::<OverlayMode>().0.lock().unwrap() = mode.to_string();
 
     // A lingering editor window would end up in the frozen frame.
     if let Some(editor) = app.get_webview_window("editor") {
@@ -197,32 +221,6 @@ pub fn start_window_pick(app: &AppHandle) {
             // overlay just loses the loupe and area selection.
             eprintln!("failed to freeze screen: {e}");
         }
-    }
-
-    // Close the overlay whenever it stops being the focused window, which
-    // covers switching desktops with a swipe: the frozen frame and window
-    // list would be wrong on the other space. Native focus events are used
-    // because the webview does not reliably see blur.
-    {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-
-        let seen_focus = Arc::new(AtomicBool::new(false));
-        let win = window.clone();
-        window.on_window_event(move |event| match event {
-            tauri::WindowEvent::Focused(true) => {
-                seen_focus.store(true, Ordering::Relaxed);
-            }
-            tauri::WindowEvent::Focused(false) => {
-                if seen_focus.load(Ordering::Relaxed) {
-                    let win = win.clone();
-                    std::thread::spawn(move || {
-                        let _ = win.close();
-                    });
-                }
-            }
-            _ => {}
-        });
     }
 
     let _ = window.show();

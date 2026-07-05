@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the overlay and editor windows",
-  "windows": ["overlay", "editor"],
+  "windows": ["overlay", "editor", "colorpick"],
   "permissions": [
     "core:default"
   ]

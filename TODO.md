@@ -40,8 +40,9 @@ Working list of everything planned. Items get checked off as they land.
 
 ## Color picker (standalone, from the tray)
 
-- [ ] Pick any pixel on screen with a magnifier loupe
-- [ ] Copy as hex / rgb / hsl
+- [x] Pick any pixel on screen with a magnifier loupe (no dim, no guide lines)
+- [x] Popup with hex / rgb / hsl / hsb / SwiftUI formats, click a row to copy it
+- [x] Cmd+C copies hex (the default) and closes the popup
 - [ ] Palette history: remember every picked color, export a palette
 
 ## Presenting mode
@@ -65,6 +66,9 @@ Working list of everything planned. Items get checked off as they land.
 
 ## Housekeeping
 
+- [ ] Desktop/space switching on macOS: the overlay stays on the space it opened on.
+      Focus-loss and NSWorkspace notification approaches both failed in practice,
+      so for now open the overlay on the desktop you want to shoot. Revisit later.
 - [ ] Custom tray and app icon (currently the default Tauri icon)
 - [ ] Windows and Linux testing pass (code is cross-platform but only exercised on macOS so far)
 - [ ] Wayland support notes and fallbacks for Linux

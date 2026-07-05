@@ -184,6 +184,8 @@
     let screen = null;         // { canvas, ctx, scale } of the frozen frame
     let dragStart = null;
     let dragging = false;
+    let mode = "capture";      // "capture" or "pick" (color picker)
+    const hint = document.getElementById("hint");
 
     function showNotice(title, body) {
       notice.innerHTML = "";
@@ -197,6 +199,13 @@
     }
 
     async function init() {
+      mode = await invoke("get_overlay_mode").catch(() => "capture");
+      if (mode === "pick") {
+        // The frozen frame shows through untinted, the screen looks normal.
+        dim.style.display = "none";
+        hint.innerHTML = 'Click to pick a color &nbsp;&middot;&nbsp; <kbd>Esc</kbd> to cancel';
+      }
+
       const granted = await invoke("check_screen_permission").catch(() => false);
       if (!granted) {
         showNotice(
@@ -236,6 +245,8 @@
           console.error("failed to load frozen screen", e);
         }
       })();
+
+      if (mode === "pick") return;
 
       try {
         windows = await invoke("list_windows");
@@ -387,6 +398,10 @@
 
     document.addEventListener("mousemove", (e) => {
       const x = e.clientX, y = e.clientY;
+      if (mode === "pick") {
+        updateLoupe(x, y);
+        return;
+      }
       if (dragStart && !dragging) {
         if (Math.abs(x - dragStart.x) > DRAG_THRESHOLD || Math.abs(y - dragStart.y) > DRAG_THRESHOLD) {
           if (screen) {
@@ -411,6 +426,18 @@
       if (done) return;
       if (e.button !== 0) {
         invoke("cancel_overlay");
+        return;
+      }
+      if (mode === "pick") {
+        if (!screen) return;
+        const px = Math.floor(e.clientX * screen.scale);
+        const py = Math.floor(e.clientY * screen.scale);
+        const d = screen.ctx.getImageData(px, py, 1, 1).data;
+        done = true;
+        invoke("pick_color", { r: d[0], g: d[1], b: d[2] }).catch((err) => {
+          console.error("pick failed", err);
+          done = false;
+        });
         return;
       }
       dragStart = { x: e.clientX, y: e.clientY };
