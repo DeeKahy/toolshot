@@ -16,7 +16,7 @@ Working list of everything planned. Items get checked off as they land.
 ## Capture
 - [ ] Fullscreen capture (current monitor, and all-monitors option)
 - [ ] Multi-monitor support for the picker overlay (currently primary monitor only)
-- [ ] Global hotkeys for each capture mode, configurable in settings
+- [x] Global hotkeys for capture and color picker, recorded in the settings window
 - [ ] Scrolling capture: auto-scroll a window and stitch frames into one tall image
 - [ ] Delayed capture: 3/5/10 second timer for menus and hover states
 - [ ] Repeat last region: hotkey that re-captures the exact same rect as last time
@@ -63,8 +63,9 @@ Working list of everything planned. Items get checked off as they land.
 - [ ] Capture history: browsable library of past shots, search by app and date
 - [ ] Screen ruler: measure pixel distances and rectangle dimensions on screen
 - [ ] Upload / share: push a capture to imgur / S3 / custom endpoint, link on clipboard
-- [ ] Settings window: hotkeys, save location, filename template, default copy behavior
-- [ ] Launch at login
+- [x] Settings window with shortcut recording (Backspace clears, Esc cancels)
+- [x] Launch at login toggle in settings
+- [ ] Settings: save location, filename template, default copy behavior
 
 ## Housekeeping
 
