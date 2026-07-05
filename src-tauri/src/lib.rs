@@ -35,6 +35,8 @@ pub fn run() {
             settings::get_autostart,
             settings::set_autostart,
             settings::close_settings,
+            settings::get_app_version,
+            settings::open_url,
         ])
         .setup(|app| {
             // Tray-only app, no dock icon.

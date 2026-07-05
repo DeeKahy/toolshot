@@ -89,6 +89,13 @@
       <div class="name">Launch at login</div>
       <input type="checkbox" id="autostart" />
     </div>
+    <div class="row">
+      <div>
+        <div class="name">Updates</div>
+        <div class="sub" id="version"></div>
+      </div>
+      <div class="bind" id="updateBtn">Check for updates</div>
+    </div>
     <div id="status"></div>
     <div id="footer">Click a binding, then press a shortcut with at least one modifier.<br>Backspace clears it, Esc cancels recording.</div>
   </div>
@@ -131,6 +138,49 @@
 
     let current = {};
     invoke("get_settings").then((s) => { current = s; });
+
+    const SITE = "https://deekahy.github.io/toolshot/";
+    const updateBtn = document.getElementById("updateBtn");
+    let appVersion = null;
+    let downloadReady = false;
+
+    invoke("get_app_version").then((v) => {
+      appVersion = v;
+      document.getElementById("version").textContent = "Version " + v;
+    });
+
+    function newer(a, b) {
+      const pa = a.split(".").map(Number);
+      const pb = b.split(".").map(Number);
+      for (let i = 0; i < 3; i++) {
+        if ((pa[i] || 0) > (pb[i] || 0)) return true;
+        if ((pa[i] || 0) < (pb[i] || 0)) return false;
+      }
+      return false;
+    }
+
+    updateBtn.addEventListener("click", async () => {
+      if (downloadReady) {
+        invoke("open_url", { url: SITE });
+        return;
+      }
+      updateBtn.textContent = "Checking...";
+      try {
+        const res = await fetch("https://api.github.com/repos/DeeKahy/toolshot/releases/latest");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const release = await res.json();
+        const latest = release.tag_name.replace(/^v/, "");
+        if (appVersion && newer(latest, appVersion)) {
+          updateBtn.textContent = "Get v" + latest;
+          downloadReady = true;
+        } else {
+          updateBtn.textContent = "Up to date";
+        }
+      } catch (e) {
+        updateBtn.textContent = "Check failed";
+        status.textContent = "Update check failed: " + String(e);
+      }
+    });
 
     for (const el of document.querySelectorAll(".bind")) {
       el.addEventListener("click", () => {

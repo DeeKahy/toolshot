@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Toolshot</title>
+  <meta name="description" content="Screenshot and screen utility tool for your menu bar. Window and area capture, annotations, color picker." />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #16171b;
+      color: #ddd;
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 40px;
+      width: 100%;
+    }
+    h1 {
+      font-size: 44px;
+      color: #fff;
+      letter-spacing: -1px;
+    }
+    .tagline {
+      font-size: 18px;
+      color: #99a;
+      margin: 8px 0 32px;
+    }
+    .features {
+      list-style: none;
+      margin-bottom: 40px;
+      color: #aab;
+      font-size: 15px;
+    }
+    .features li { padding: 3px 0; }
+    .features li::before { content: "+ "; color: #4da3ff; }
+    .downloads {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .btn {
+      display: inline-block;
+      background: #3a6ea5;
+      color: #fff;
+      text-decoration: none;
+      font-size: 15px;
+      padding: 12px 22px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+    }
+    .btn:hover { background: #4580bd; }
+    .btn.secondary {
+      background: #232428;
+      border-color: #34353c;
+      color: #ccd;
+    }
+    .btn.secondary:hover { background: #2b2c31; }
+    .btn small { display: block; font-size: 11px; opacity: 0.75; }
+    #meta {
+      font-size: 13px;
+      color: #778;
+      margin-bottom: 40px;
+      min-height: 20px;
+    }
+    #meta a { color: #4da3ff; }
+    section { margin-bottom: 36px; }
+    h2 { font-size: 18px; color: #fff; margin-bottom: 10px; }
+    p, section li { color: #aab; font-size: 15px; }
+    code, pre {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: #232428;
+      border: 1px solid #303138;
+      border-radius: 6px;
+    }
+    code { padding: 1px 6px; }
+    pre {
+      padding: 12px 14px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    pre code { background: none; border: none; padding: 0; }
+    ol { margin-left: 20px; }
+    footer {
+      margin-top: auto;
+      text-align: center;
+      padding: 24px;
+      font-size: 13px;
+      color: #667;
+    }
+    footer a { color: #99a; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Toolshot</h1>
+    <p class="tagline">Screenshots, annotations and a color picker, living quietly in your menu bar.</p>
+
+    <ul class="features">
+      <li>Click any window to capture it, or drag to capture an area</li>
+      <li>Pixel-perfect magnifier loupe with live hex readout</li>
+      <li>Annotate with rectangles and arrows, copy with one key</li>
+      <li>Color picker with hex, rgb, hsl, hsb and SwiftUI formats</li>
+      <li>Global hotkeys, launch at login, no dock clutter</li>
+    </ul>
+
+    <div class="downloads" id="downloads">
+      <a class="btn" id="dl-mac" hidden>Download for macOS<small></small></a>
+      <a class="btn secondary" id="dl-linux" hidden>Linux AppImage<small></small></a>
+      <a class="btn secondary" id="dl-windows" hidden>Windows installer<small></small></a>
+      <a class="btn secondary" id="dl-all" href="https://github.com/DeeKahy/toolshot/releases">All downloads</a>
+    </div>
+    <div id="meta">Loading latest release...</div>
+
+    <section>
+      <h2>First launch on macOS</h2>
+      <p>Toolshot is not signed with an Apple developer certificate, so macOS blocks the first launch. Two ways around it:</p>
+      <ol>
+        <li>Open it once, then go to System Settings, Privacy and Security, and click "Open Anyway".</li>
+        <li>Or clear the quarantine flag: <code>xattr -dr com.apple.quarantine /Applications/Toolshot.app</code></li>
+      </ol>
+      <p>The first capture asks for Screen Recording permission. Grant it and relaunch the app.</p>
+    </section>
+
+    <section>
+      <h2>Nix</h2>
+      <p>The repo is a flake:</p>
+      <pre><code>nix run github:DeeKahy/toolshot</code></pre>
+      <p>Or add <code>github:DeeKahy/toolshot</code> as an input and use <code>packages.&lt;system&gt;.default</code> in your nix-darwin or NixOS configuration. Details in the <a href="https://github.com/DeeKahy/toolshot#install" style="color:#4da3ff">README</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <a href="https://github.com/DeeKahy/toolshot">Source on GitHub</a> &middot; MIT licensed
+  </footer>
+
+  <script>
+    const exts = {
+      mac: [".dmg"],
+      linux: [".AppImage", ".appimage"],
+      windows: ["-setup.exe", ".msi", ".exe"],
+    };
+
+    function pick(assets, list) {
+      for (const ext of list) {
+        const hit = assets.find((a) => a.name.endsWith(ext));
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    function wire(id, asset, version) {
+      const el = document.getElementById(id);
+      if (!asset) return;
+      el.href = asset.browser_download_url;
+      el.querySelector("small").textContent = version + " · " + (asset.size / 1048576).toFixed(1) + " MB";
+      el.hidden = false;
+    }
+
+    fetch("https://api.github.com/repos/DeeKahy/toolshot/releases")
+      .then((r) => r.json())
+      .then((releases) => {
+        if (!Array.isArray(releases)) throw new Error("no releases");
+        const stable = releases.find((r) => !r.prerelease && !r.draft);
+        const beta = releases.find((r) => r.prerelease && !r.draft);
+        const meta = document.getElementById("meta");
+
+        if (!stable && !beta) {
+          meta.textContent = "No releases yet. First one is on its way.";
+          return;
+        }
+
+        const rel = stable || beta;
+        wire("dl-mac", pick(rel.assets, exts.mac), rel.tag_name);
+        wire("dl-linux", pick(rel.assets, exts.linux), rel.tag_name);
+        wire("dl-windows", pick(rel.assets, exts.windows), rel.tag_name);
+
+        let text = "Latest " + (stable ? "stable" : "beta") + ": " + rel.tag_name;
+        if (stable && beta && beta.created_at > stable.created_at) {
+          text += ' · <a href="' + beta.html_url + '">beta ' + beta.tag_name + "</a>";
+        }
+        meta.innerHTML = text;
+      })
+      .catch(() => {
+        document.getElementById("meta").textContent = "Could not load release info, use the All downloads button.";
+      });
+  </script>
+</body>
+</html>

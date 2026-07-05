@@ -1,45 +1,96 @@
 # Toolshot
 
-A cross-platform screenshot and screen utility tool that lives in the tray. Built with Tauri and xcap.
+A screenshot and screen utility tool that lives in your menu bar. Click a window to capture it, drag to capture an area with a pixel-perfect magnifier loupe, annotate with rectangles and arrows, pick colors from anywhere on screen. Built with Tauri and xcap.
 
-Current state: window capture works. Click the tray icon, pick "Capture Window", hover to highlight any window, click to capture it. The shot opens in an editor window where Cmd+C copies it to the clipboard and closes the window. See [TODO.md](TODO.md) for the roadmap (area select, annotations, color picker, presenting mode and more).
+Download: https://deekahy.github.io/toolshot/
 
-## Requirements
+## Features
+
+- Window capture: hover highlights any window, click grabs it
+- Area capture in the same overlay: just drag instead of clicking
+- Magnifier loupe with pixel grid, coordinates and live hex color readout
+- Crosshair guide lines for lining up selections
+- Editor with rectangle and arrow annotations, color choice and undo
+- Cmd+C copies the annotated shot to the clipboard and gets out of your way
+- Color picker with a format popup: hex, rgb, hsl, hsb, SwiftUI, click to copy
+- Configurable global hotkeys for capture and color picker
+- Launch at login toggle
+
+See [TODO.md](TODO.md) for the roadmap: blur/blackout, text tool, OCR, scrolling capture, presenting mode with laser pointer and fading ink, and more.
+
+## Install
+
+### macOS (download)
+
+Grab the dmg from the [download page](https://deekahy.github.io/toolshot/) or the [releases](https://github.com/DeeKahy/toolshot/releases), drag Toolshot to Applications.
+
+The app is not signed with an Apple developer certificate yet, so the first launch needs one manual step: macOS will refuse to open it, then you go to System Settings, Privacy and Security, scroll down and click "Open Anyway". Alternatively clear the quarantine flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Toolshot.app
+```
+
+On first capture, grant Screen Recording permission (System Settings, Privacy and Security, Screen and System Audio Recording) and relaunch.
+
+### Nix (flake, macOS via nix-darwin or NixOS)
+
+The repo is a flake with a package output. Try it without installing:
+
+```sh
+nix run github:DeeKahy/toolshot
+```
+
+Install into your profile:
+
+```sh
+nix profile install github:DeeKahy/toolshot
+```
+
+Or add it to a nix-darwin / NixOS configuration:
+
+```nix
+{
+  inputs.toolshot.url = "github:DeeKahy/toolshot";
+  # then in your system packages:
+  # environment.systemPackages = [ inputs.toolshot.packages.${pkgs.system}.default ];
+}
+```
+
+On macOS the package also ships an app bundle at `$out/Applications/Toolshot.app`. Spotlight does not index symlinked apps, so copy it into place from an activation script if you want it searchable:
+
+```nix
+system.activationScripts.postActivation.text = ''
+  rm -rf /Applications/Toolshot.app
+  cp -R ${inputs.toolshot.packages.aarch64-darwin.default}/Applications/Toolshot.app /Applications/Toolshot.app
+'';
+```
+
+Linux support is compiled in but has not had a real testing pass yet. A nixpkgs submission is planned once that lands.
+
+## Build from source
 
 Everything comes from the flake:
 
 ```sh
 nix develop
-```
-
-That provides cargo, rustc, rustfmt, clippy, rust-analyzer and node (plus the Tauri system libraries on Linux). Without nix, install a Rust toolchain and Node.js yourself.
-
-## Run
-
-Inside the dev shell:
-
-```sh
 cd src-tauri
 cargo build
 ./target/debug/toolshot
 ```
 
-Or through the Tauri CLI:
+Without nix: install a Rust toolchain and Node.js, then `npm install && npm run tauri dev`.
 
-```sh
-npm install
-npm run tauri dev
-```
+## Updates
 
-The app has no main window. Look for the icon in the menu bar (macOS) or system tray.
-
-## macOS permissions
-
-The first capture will prompt for Screen Recording permission (System Settings, Privacy and Security, Screen and System Audio Recording). Grant it and relaunch the app. Without it, window titles come back empty and captures fail.
+Toolshot checks for updates only when you ask it to: Settings, "Check for updates". If a newer version exists it opens the download page. Nix installs update through nix instead.
 
 ## Layout
 
-- `src/` static frontend pages, no build step (`overlay.html` window picker, `editor.html` screenshot editor)
-- `src-tauri/src/lib.rs` app setup and run loop
-- `src-tauri/src/tray.rs` tray icon and menu
-- `src-tauri/src/capture.rs` window enumeration, capture, clipboard, editor/overlay window management
+- `src/` static frontend pages, no build step (overlay, editor, color popup, settings)
+- `src-tauri/src/` Rust backend: tray, capture, clipboard, shortcuts, settings
+- `docs/` the GitHub Pages download site
+- `.github/workflows/` release CI building macOS, Linux and Windows artifacts
+
+## License
+
+MIT

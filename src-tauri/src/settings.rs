@@ -72,7 +72,7 @@ pub fn open_settings_window(app: &AppHandle) {
     }
     let result = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Toolshot Settings")
-        .inner_size(430.0, 320.0)
+        .inner_size(430.0, 390.0)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -146,4 +146,28 @@ pub fn close_settings(app: AppHandle) {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.close();
     }
+}
+
+#[tauri::command]
+pub fn get_app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+// Only opens the project's own pages, updates are manual downloads.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    let allowed = url.starts_with("https://deekahy.github.io/toolshot")
+        || url.starts_with("https://github.com/DeeKahy/toolshot");
+    if !allowed {
+        return Err("refusing to open unexpected url".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn();
+
+    result.map(|_| ()).map_err(|e| e.to_string())
 }
