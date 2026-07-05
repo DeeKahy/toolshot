@@ -3,7 +3,8 @@ use serde::Serialize;
 use std::io::Cursor;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use xcap::image::{ExtendedColorType, ImageFormat};
+use xcap::image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use xcap::image::{ExtendedColorType, ImageEncoder};
 
 pub struct Capture {
     pub width: u32,
@@ -22,7 +23,6 @@ pub struct FrozenScreen {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
-    pub png: Vec<u8>,
     // Physical pixels per logical overlay pixel.
     pub scale: f64,
 }
@@ -40,15 +40,14 @@ pub struct ScreenMeta {
 
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let mut png = Vec::new();
-    xcap::image::write_buffer_with_format(
-        &mut Cursor::new(&mut png),
-        rgba,
-        width,
-        height,
-        ExtendedColorType::Rgba8,
-        ImageFormat::Png,
-    )
-    .map_err(|e| e.to_string())?;
+    let encoder = PngEncoder::new_with_quality(
+        Cursor::new(&mut png),
+        CompressionType::Fast,
+        FilterType::Adaptive,
+    );
+    encoder
+        .write_image(rgba, width, height, ExtendedColorType::Rgba8)
+        .map_err(|e| e.to_string())?;
     Ok(png)
 }
 
@@ -66,14 +65,13 @@ fn freeze_screen(pos_x: f64, pos_y: f64, logical_width: f64) -> Result<FrozenScr
     let image = monitor.capture_image().map_err(|e| e.to_string())?;
     let (width, height) = (image.width(), image.height());
     let rgba = image.into_raw();
-    let png = encode_png(&rgba, width, height)?;
     let scale = if logical_width > 0.0 {
         width as f64 / logical_width
     } else {
         1.0
     };
 
-    Ok(FrozenScreen { width, height, rgba, png, scale })
+    Ok(FrozenScreen { width, height, rgba, scale })
 }
 
 #[derive(Serialize, Clone)]
@@ -160,18 +158,12 @@ pub fn start_window_pick(app: &AppHandle) {
     let size = monitor.size().to_logical::<f64>(scale);
     let pos = monitor.position().to_logical::<f64>(scale);
 
-    match freeze_screen(pos.x, pos.y, size.width) {
-        Ok(frozen) => {
-            *app.state::<ScreenState>().0.lock().unwrap() = Some(frozen);
-        }
-        Err(e) => {
-            // Window picking still works without the frozen frame, the
-            // overlay just loses the loupe and area selection.
-            eprintln!("failed to freeze screen: {e}");
-            *app.state::<ScreenState>().0.lock().unwrap() = None;
-        }
-    }
+    // Drop any stale frame before the overlay can ask for it.
+    *app.state::<ScreenState>().0.lock().unwrap() = None;
 
+    // Create the window hidden first so the webview boots while the screen
+    // capture runs, then reveal it once the frozen frame is ready. Hidden
+    // windows do not render, so the overlay is never part of the frame.
     let result = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
         .title("toolshot overlay")
         .position(pos.x, pos.y)
@@ -185,18 +177,33 @@ pub fn start_window_pick(app: &AppHandle) {
         .minimizable(false)
         .skip_taskbar(true)
         .accept_first_mouse(true)
-        .visible_on_all_workspaces(true)
-        .focused(true)
+        .visible(false)
+        .focused(false)
         .build();
 
-    match result {
-        // Accessory apps do not activate on their own, without this the
-        // overlay never sees keyboard events and Esc does nothing.
-        Ok(window) => {
-            let _ = window.set_focus();
+    let window = match result {
+        Ok(window) => window,
+        Err(e) => {
+            eprintln!("failed to open overlay: {e}");
+            return;
         }
-        Err(e) => eprintln!("failed to open overlay: {e}"),
+    };
+
+    match freeze_screen(pos.x, pos.y, size.width) {
+        Ok(frozen) => {
+            *app.state::<ScreenState>().0.lock().unwrap() = Some(frozen);
+        }
+        Err(e) => {
+            // Window picking still works without the frozen frame, the
+            // overlay just loses the loupe and area selection.
+            eprintln!("failed to freeze screen: {e}");
+        }
     }
+
+    let _ = window.show();
+    // Accessory apps do not activate on their own, without this the
+    // overlay never sees keyboard events and Esc does nothing.
+    let _ = window.set_focus();
 }
 
 #[tauri::command]
@@ -270,8 +277,9 @@ pub fn capture_window(
 pub fn get_screen_png(state: State<'_, ScreenState>) -> Result<ScreenMeta, String> {
     let guard = state.0.lock().unwrap();
     let screen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
+    let png = encode_png(&screen.rgba, screen.width, screen.height)?;
     Ok(ScreenMeta {
-        png: base64::engine::general_purpose::STANDARD.encode(&screen.png),
+        png: base64::engine::general_purpose::STANDARD.encode(&png),
         width: screen.width,
         height: screen.height,
         scale: screen.scale,
