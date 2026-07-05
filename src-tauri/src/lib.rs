@@ -1,9 +1,15 @@
 mod capture;
 mod picker;
+mod settings;
 mod tray;
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(capture::CaptureState::default())
         .manage(capture::ScreenState::default())
         .manage(capture::OverlayMode::default())
@@ -24,11 +30,17 @@ pub fn run() {
             picker::get_picked_color,
             picker::copy_text,
             picker::close_color_popup,
+            settings::get_settings,
+            settings::set_shortcut,
+            settings::get_autostart,
+            settings::set_autostart,
+            settings::close_settings,
         ])
         .setup(|app| {
             // Tray-only app, no dock icon.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            settings::init(app.handle());
             tray::create_tray(app.handle())?;
             Ok(())
         })

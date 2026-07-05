@@ -9,7 +9,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let capture_fullscreen = MenuItem::with_id(app, "capture_fullscreen", "Capture Fullscreen", false, None::<&str>)?;
     let color_picker = MenuItem::with_id(app, "color_picker", "Color Picker", true, None::<&str>)?;
     let presenting = MenuItem::with_id(app, "presenting", "Presenting Mode", false, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", false, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Toolshot", true, None::<&str>)?;
 
     let menu = Menu::with_items(
@@ -35,6 +35,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "capture" => crate::capture::start_window_pick(app),
             "color_picker" => crate::capture::start_color_pick(app),
+            "settings" => crate::settings::open_settings_window(app),
             "quit" => app.exit(0),
             _ => {}
         })

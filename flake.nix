@@ -11,6 +11,31 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      packages = forAllSystems (pkgs: rec {
+        default = toolshot;
+        toolshot = pkgs.rustPlatform.buildRustPackage {
+          pname = "toolshot";
+          version = "0.1.0";
+          src = ./.;
+          cargoRoot = "src-tauri";
+          buildAndTestSubdir = "src-tauri";
+          cargoLock.lockFile = ./src-tauri/Cargo.lock;
+          nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.pkg-config pkgs.wrapGAppsHook3 ];
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.gtk3
+            pkgs.webkitgtk_4_1
+            pkgs.libsoup_3
+            pkgs.librsvg
+            pkgs.libayatana-appindicator
+            pkgs.dbus
+            pkgs.openssl
+            pkgs.xorg.libxcb
+            pkgs.pipewire
+          ];
+          doCheck = false;
+        };
+      });
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
