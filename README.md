@@ -6,27 +6,29 @@ Current state: window capture works. Click the tray icon, pick "Capture Window",
 
 ## Requirements
 
-- Rust toolchain (cargo). On a nix system without a global Rust install:
+Everything comes from the flake:
 
-  ```sh
-  nix shell nixpkgs#cargo nixpkgs#rustc
-  ```
+```sh
+nix develop
+```
 
-- Node.js (only used for the Tauri CLI)
+That provides cargo, rustc, rustfmt, clippy, rust-analyzer and node (plus the Tauri system libraries on Linux). Without nix, install a Rust toolchain and Node.js yourself.
 
 ## Run
 
-```sh
-npm install
-npm run tauri dev
-```
-
-Or build the Rust side directly:
+Inside the dev shell:
 
 ```sh
 cd src-tauri
 cargo build
 ./target/debug/toolshot
+```
+
+Or through the Tauri CLI:
+
+```sh
+npm install
+npm run tauri dev
 ```
 
 The app has no main window. Look for the icon in the menu bar (macOS) or system tray.
