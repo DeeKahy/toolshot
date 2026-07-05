@@ -4,10 +4,13 @@ mod tray;
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(capture::CaptureState::default())
+        .manage(capture::ScreenState::default())
         .invoke_handler(tauri::generate_handler![
             capture::check_screen_permission,
             capture::list_windows,
             capture::capture_window,
+            capture::get_screen_png,
+            capture::capture_area,
             capture::cancel_overlay,
             capture::get_capture_png,
             capture::copy_capture,

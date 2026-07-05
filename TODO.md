@@ -7,13 +7,13 @@ Working list of everything planned. Items get checked off as they land.
 - [x] Tray icon with menu (macOS menu bar, Windows system tray)
 - [x] Window capture: pick a window by clicking it, with live highlight and app/title label
 - [x] Editor window opens after capture, Cmd+C (Ctrl+C) copies to clipboard and closes, Esc closes
+- [x] Area select merged into the same overlay: click captures the window, drag captures the area
+  - [x] Magnifier loupe with pixel grid, coordinates and color under the cursor
+  - [x] Crosshair guide lines extending up, down, left and right from the cursor
+  - [x] Live width x height readout while dragging
+  - [x] Area crops from a frame frozen when the overlay opens, so pixels cannot shift mid drag
 
 ## Capture
-
-- [ ] Area select with drag rectangle
-  - [ ] Magnifier loupe around the cursor showing zoomed pixels for pixel-perfect edges
-  - [ ] Crosshair guide lines extending up, down, left and right from the cursor
-  - [ ] Show live width x height readout while dragging
 - [ ] Fullscreen capture (current monitor, and all-monitors option)
 - [ ] Multi-monitor support for the picker overlay (currently primary monitor only)
 - [ ] Global hotkeys for each capture mode, configurable in settings

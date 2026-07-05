@@ -15,6 +15,67 @@ pub struct Capture {
 #[derive(Default)]
 pub struct CaptureState(pub Mutex<Option<Capture>>);
 
+// Full-screen frame grabbed the moment the overlay opens. Area selection
+// crops from this so the pixels cannot change mid drag, and the magnifier
+// loupe samples from it.
+pub struct FrozenScreen {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub png: Vec<u8>,
+    // Physical pixels per logical overlay pixel.
+    pub scale: f64,
+}
+
+#[derive(Default)]
+pub struct ScreenState(pub Mutex<Option<FrozenScreen>>);
+
+#[derive(Serialize)]
+pub struct ScreenMeta {
+    pub png: String,
+    pub width: u32,
+    pub height: u32,
+    pub scale: f64,
+}
+
+fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let mut png = Vec::new();
+    xcap::image::write_buffer_with_format(
+        &mut Cursor::new(&mut png),
+        rgba,
+        width,
+        height,
+        ExtendedColorType::Rgba8,
+        ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(png)
+}
+
+fn freeze_screen(pos_x: f64, pos_y: f64, logical_width: f64) -> Result<FrozenScreen, String> {
+    let monitor = xcap::Monitor::from_point(pos_x as i32 + 1, pos_y as i32 + 1)
+        .or_else(|_| {
+            xcap::Monitor::all()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .next()
+                .ok_or_else(|| "no monitors found".to_string())
+        })
+        .map_err(|e| e.to_string())?;
+
+    let image = monitor.capture_image().map_err(|e| e.to_string())?;
+    let (width, height) = (image.width(), image.height());
+    let rgba = image.into_raw();
+    let png = encode_png(&rgba, width, height)?;
+    let scale = if logical_width > 0.0 {
+        width as f64 / logical_width
+    } else {
+        1.0
+    };
+
+    Ok(FrozenScreen { width, height, rgba, png, scale })
+}
+
 #[derive(Serialize, Clone)]
 pub struct WindowInfo {
     pub id: u32,
@@ -84,6 +145,13 @@ pub fn start_window_pick(app: &AppHandle) {
         return;
     }
 
+    // A lingering editor window would end up in the frozen frame.
+    if let Some(editor) = app.get_webview_window("editor") {
+        let _ = editor.hide();
+        let _ = editor.close();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+
     let monitor = match app.primary_monitor() {
         Ok(Some(m)) => m,
         _ => return,
@@ -91,6 +159,18 @@ pub fn start_window_pick(app: &AppHandle) {
     let scale = monitor.scale_factor();
     let size = monitor.size().to_logical::<f64>(scale);
     let pos = monitor.position().to_logical::<f64>(scale);
+
+    match freeze_screen(pos.x, pos.y, size.width) {
+        Ok(frozen) => {
+            *app.state::<ScreenState>().0.lock().unwrap() = Some(frozen);
+        }
+        Err(e) => {
+            // Window picking still works without the frozen frame, the
+            // overlay just loses the loupe and area selection.
+            eprintln!("failed to freeze screen: {e}");
+            *app.state::<ScreenState>().0.lock().unwrap() = None;
+        }
+    }
 
     let result = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
         .title("toolshot overlay")
@@ -175,17 +255,7 @@ pub fn capture_window(
     let image = target.capture_image().map_err(|e| e.to_string())?;
     let (width, height) = (image.width(), image.height());
     let rgba = image.into_raw();
-
-    let mut png = Vec::new();
-    xcap::image::write_buffer_with_format(
-        &mut Cursor::new(&mut png),
-        &rgba,
-        width,
-        height,
-        ExtendedColorType::Rgba8,
-        ImageFormat::Png,
-    )
-    .map_err(|e| e.to_string())?;
+    let png = encode_png(&rgba, width, height)?;
 
     *state.0.lock().unwrap() = Some(Capture { width, height, rgba, png });
 
@@ -193,6 +263,71 @@ pub fn capture_window(
         let _ = overlay.close();
     }
     open_editor(&app, width, height);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_screen_png(state: State<'_, ScreenState>) -> Result<ScreenMeta, String> {
+    let guard = state.0.lock().unwrap();
+    let screen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
+    Ok(ScreenMeta {
+        png: base64::engine::general_purpose::STANDARD.encode(&screen.png),
+        width: screen.width,
+        height: screen.height,
+        scale: screen.scale,
+    })
+}
+
+// Rect arrives in logical overlay coordinates, cropping happens in the
+// physical pixels of the frozen frame.
+#[tauri::command]
+pub fn capture_area(
+    app: AppHandle,
+    screen: State<'_, ScreenState>,
+    capture: State<'_, CaptureState>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let (crop_rgba, crop_w, crop_h) = {
+        let guard = screen.0.lock().unwrap();
+        let frozen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
+        let s = frozen.scale;
+
+        let x0 = ((x * s).round().max(0.0) as u32).min(frozen.width);
+        let y0 = ((y * s).round().max(0.0) as u32).min(frozen.height);
+        let x1 = (((x + width) * s).round().max(0.0) as u32).min(frozen.width);
+        let y1 = (((y + height) * s).round().max(0.0) as u32).min(frozen.height);
+
+        let crop_w = x1.saturating_sub(x0);
+        let crop_h = y1.saturating_sub(y0);
+        if crop_w < 2 || crop_h < 2 {
+            return Err("selection too small".to_string());
+        }
+
+        let stride = frozen.width as usize * 4;
+        let mut crop_rgba = Vec::with_capacity(crop_w as usize * crop_h as usize * 4);
+        for row in y0..y1 {
+            let start = row as usize * stride + x0 as usize * 4;
+            let end = start + crop_w as usize * 4;
+            crop_rgba.extend_from_slice(&frozen.rgba[start..end]);
+        }
+        (crop_rgba, crop_w, crop_h)
+    };
+
+    let png = encode_png(&crop_rgba, crop_w, crop_h)?;
+    *capture.0.lock().unwrap() = Some(Capture {
+        width: crop_w,
+        height: crop_h,
+        rgba: crop_rgba,
+        png,
+    });
+
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.close();
+    }
+    open_editor(&app, crop_w, crop_h);
     Ok(())
 }
 
