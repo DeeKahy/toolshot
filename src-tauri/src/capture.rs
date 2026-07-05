@@ -32,7 +32,6 @@ pub struct ScreenState(pub Mutex<Option<FrozenScreen>>);
 
 #[derive(Serialize)]
 pub struct ScreenMeta {
-    pub png: String,
     pub width: u32,
     pub height: u32,
     pub scale: f64,
@@ -200,6 +199,32 @@ pub fn start_window_pick(app: &AppHandle) {
         }
     }
 
+    // Close the overlay whenever it stops being the focused window, which
+    // covers switching desktops with a swipe: the frozen frame and window
+    // list would be wrong on the other space. Native focus events are used
+    // because the webview does not reliably see blur.
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let seen_focus = Arc::new(AtomicBool::new(false));
+        let win = window.clone();
+        window.on_window_event(move |event| match event {
+            tauri::WindowEvent::Focused(true) => {
+                seen_focus.store(true, Ordering::Relaxed);
+            }
+            tauri::WindowEvent::Focused(false) => {
+                if seen_focus.load(Ordering::Relaxed) {
+                    let win = win.clone();
+                    std::thread::spawn(move || {
+                        let _ = win.close();
+                    });
+                }
+            }
+            _ => {}
+        });
+    }
+
     let _ = window.show();
     // Accessory apps do not activate on their own, without this the
     // overlay never sees keyboard events and Esc does nothing.
@@ -274,16 +299,23 @@ pub fn capture_window(
 }
 
 #[tauri::command]
-pub fn get_screen_png(state: State<'_, ScreenState>) -> Result<ScreenMeta, String> {
+pub fn get_screen_meta(state: State<'_, ScreenState>) -> Result<ScreenMeta, String> {
     let guard = state.0.lock().unwrap();
     let screen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
-    let png = encode_png(&screen.rgba, screen.width, screen.height)?;
     Ok(ScreenMeta {
-        png: base64::engine::general_purpose::STANDARD.encode(&png),
         width: screen.width,
         height: screen.height,
         scale: screen.scale,
     })
+}
+
+// Raw RGBA over binary IPC, skipping PNG and base64 entirely. This is what
+// keeps the loupe close to instant.
+#[tauri::command]
+pub fn get_screen_rgba(state: State<'_, ScreenState>) -> Result<tauri::ipc::Response, String> {
+    let guard = state.0.lock().unwrap();
+    let screen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
+    Ok(tauri::ipc::Response::new(screen.rgba.clone()))
 }
 
 // Rect arrives in logical overlay coordinates, cropping happens in the

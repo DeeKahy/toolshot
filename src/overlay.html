@@ -144,7 +144,7 @@
   </style>
 </head>
 <body>
-  <img id="bg" alt="" />
+  <canvas id="bg"></canvas>
   <div id="dim"></div>
   <div id="highlight"></div>
   <div id="label"></div>
@@ -181,14 +181,9 @@
     let windows = [];
     let current = null;
     let done = false;
-    let screen = null;         // { img, scale } of the frozen frame
+    let screen = null;         // { canvas, ctx, scale } of the frozen frame
     let dragStart = null;
     let dragging = false;
-
-    const pixelCanvas = document.createElement("canvas");
-    pixelCanvas.width = 1;
-    pixelCanvas.height = 1;
-    const pixelCtx = pixelCanvas.getContext("2d", { willReadFrequently: true });
 
     function showNotice(title, body) {
       notice.innerHTML = "";
@@ -216,24 +211,30 @@
       }
 
       // The overlay page can be ready before the screen freeze finishes,
-      // so poll briefly instead of giving up on the first miss.
+      // so poll briefly instead of giving up on the first miss. The pixels
+      // come as raw RGBA over binary IPC, no PNG or base64 involved.
       (async () => {
-        for (let attempt = 0; attempt < 30; attempt++) {
-          try {
-            const meta = await invoke("get_screen_png");
-            const img = new Image();
-            img.onload = () => {
-              screen = { img, scale: meta.scale };
-              bg.src = img.src;
-              bg.style.display = "block";
-            };
-            img.src = "data:image/png;base64," + meta.png;
-            return;
-          } catch (e) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
+        let meta = null;
+        for (let attempt = 0; attempt < 30 && !meta; attempt++) {
+          meta = await invoke("get_screen_meta").catch(() => null);
+          if (!meta) await new Promise((r) => setTimeout(r, 50));
         }
-        console.error("no frozen screen, loupe and drag disabled");
+        if (!meta) {
+          console.error("no frozen screen, loupe and drag disabled");
+          return;
+        }
+        try {
+          const buf = await invoke("get_screen_rgba");
+          const data = new ImageData(new Uint8ClampedArray(buf), meta.width, meta.height);
+          bg.width = meta.width;
+          bg.height = meta.height;
+          const ctx = bg.getContext("2d", { willReadFrequently: true });
+          ctx.putImageData(data, 0, 0);
+          bg.style.display = "block";
+          screen = { canvas: bg, ctx, scale: meta.scale };
+        } catch (e) {
+          console.error("failed to load frozen screen", e);
+        }
       })();
 
       try {
@@ -295,8 +296,7 @@
 
     function centerHex(px, py) {
       try {
-        pixelCtx.drawImage(screen.img, px, py, 1, 1, 0, 0, 1, 1);
-        const d = pixelCtx.getImageData(0, 0, 1, 1).data;
+        const d = screen.ctx.getImageData(px, py, 1, 1).data;
         return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
       } catch (e) {
         return "";
@@ -316,7 +316,7 @@
       loupeCtx.fillStyle = "#000";
       loupeCtx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
       loupeCtx.drawImage(
-        screen.img,
+        screen.canvas,
         px - half, py - half, SAMPLE, SAMPLE,
         0, 0, LOUPE_SIZE, LOUPE_SIZE
       );
@@ -456,14 +456,6 @@
     }
 
     document.addEventListener("contextmenu", (e) => e.preventDefault());
-
-    // Switching desktops (or anything else taking focus) leaves the overlay
-    // showing a stale frame on the wrong space, so just bail out.
-    let focusedOnce = false;
-    window.addEventListener("focus", () => { focusedOnce = true; });
-    window.addEventListener("blur", () => {
-      if (focusedOnce && !done) invoke("cancel_overlay");
-    });
 
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
