@@ -80,6 +80,13 @@
     </div>
     <div class="row">
       <div>
+        <div class="name">Fullscreen capture</div>
+        <div class="sub">Capture the whole screen instantly</div>
+      </div>
+      <div class="bind unset" id="bind-fullscreen" data-kind="fullscreen">Not set</div>
+    </div>
+    <div class="row">
+      <div>
         <div class="name">Color picker</div>
         <div class="sub">Pick a pixel anywhere on screen</div>
       </div>
@@ -124,6 +131,7 @@
 
     invoke("get_settings").then((s) => {
       render(document.getElementById("bind-capture"), s.capture_shortcut);
+      render(document.getElementById("bind-fullscreen"), s.fullscreen_shortcut);
       render(document.getElementById("bind-picker"), s.picker_shortcut);
     });
 
@@ -193,7 +201,7 @@
     }
 
     function currentAccel(el) {
-      return el.dataset.kind === "capture" ? current.capture_shortcut : current.picker_shortcut;
+      return current[el.dataset.kind + "_shortcut"];
     }
 
     function keyOk(code) {
@@ -204,8 +212,7 @@
       const kind = el.dataset.kind;
       try {
         await invoke("set_shortcut", { kind, accel });
-        if (kind === "capture") current.capture_shortcut = accel;
-        else current.picker_shortcut = accel;
+        current[kind + "_shortcut"] = accel;
         render(el, accel);
       } catch (e) {
         status.textContent = "Could not register: " + String(e);

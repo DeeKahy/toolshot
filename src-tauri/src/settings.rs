@@ -9,6 +9,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 #[serde(default)]
 pub struct Settings {
     pub capture_shortcut: Option<String>,
+    pub fullscreen_shortcut: Option<String>,
     pub picker_shortcut: Option<String>,
 }
 
@@ -41,6 +42,7 @@ fn register_shortcut(app: &AppHandle, kind: &str, accel: &str) -> Result<(), Str
             if event.state() == ShortcutState::Pressed {
                 match kind.as_str() {
                     "capture" => crate::capture::start_window_pick(app),
+                    "fullscreen" => crate::capture::capture_fullscreen(app),
                     "picker" => crate::capture::start_color_pick(app),
                     _ => {}
                 }
@@ -55,6 +57,11 @@ pub fn init(app: &AppHandle) {
     if let Some(accel) = &settings.capture_shortcut {
         if let Err(e) = register_shortcut(app, "capture", accel) {
             eprintln!("could not register capture shortcut {accel}: {e}");
+        }
+    }
+    if let Some(accel) = &settings.fullscreen_shortcut {
+        if let Err(e) = register_shortcut(app, "fullscreen", accel) {
+            eprintln!("could not register fullscreen shortcut {accel}: {e}");
         }
     }
     if let Some(accel) = &settings.picker_shortcut {
@@ -72,7 +79,7 @@ pub fn open_settings_window(app: &AppHandle) {
     }
     let result = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Toolshot Settings")
-        .inner_size(430.0, 390.0)
+        .inner_size(430.0, 448.0)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -103,6 +110,7 @@ pub fn set_shortcut(
         let settings = state.0.lock().unwrap();
         match kind.as_str() {
             "capture" => settings.capture_shortcut.clone(),
+            "fullscreen" => settings.fullscreen_shortcut.clone(),
             "picker" => settings.picker_shortcut.clone(),
             _ => return Err("unknown shortcut kind".to_string()),
         }
@@ -120,6 +128,7 @@ pub fn set_shortcut(
     let mut settings = state.0.lock().unwrap();
     match kind.as_str() {
         "capture" => settings.capture_shortcut = accel,
+        "fullscreen" => settings.fullscreen_shortcut = accel,
         "picker" => settings.picker_shortcut = accel,
         _ => {}
     }
