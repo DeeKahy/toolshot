@@ -70,9 +70,9 @@ The app must keep running with zero windows: `lib.rs` intercepts `RunEvent::Exit
 
 - Without macOS Screen Recording permission, `xcap::Window::all()` returns an error, not an empty list. The overlay checks `check_screen_permission` first and shows instructions. When running the raw dev binary, the TCC grant attaches to the parent terminal, not the app.
 - Accessory apps do not focus their windows automatically. Every window that needs keyboard input calls `set_focus()` after creation, otherwise Esc and shortcuts silently do nothing.
-- The overlay only covers the primary monitor, and macOS Space switching leaves a stale overlay behind (two dismissal approaches failed, see TODO.md housekeeping).
+- The overlay only covers the primary monitor, and macOS Space switching leaves a stale overlay behind (two dismissal approaches failed, see the open issue).
 - Linux compiles but has never been run. Wayland specifics are untested.
 
 ## Roadmap
 
-TODO.md is the authoritative feature roadmap and gets checked off as features land. Check it before adding features, update it after.
+Planned work lives in GitHub issues (gh issue list). TODO.md keeps the history of what has landed, append to it when a feature ships and close the matching issue.
