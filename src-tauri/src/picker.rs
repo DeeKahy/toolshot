@@ -20,13 +20,11 @@ pub async fn pick_color(
     // The color came from the frozen frame, which is done now.
     *screen.0.lock().unwrap() = None;
 
-    // Closing the overlay before the popup exists must not end the
-    // process.
+    // Popup first, overlay closed after: the window count must never hit
+    // zero mid transition. Windows processes the overlay destroy late
+    // enough that the busy flag alone cannot cover the gap.
     crate::set_busy(&app, true);
 
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        let _ = overlay.close();
-    }
     if let Some(existing) = app.get_webview_window("colorpick") {
         let _ = existing.close();
     }
@@ -45,6 +43,9 @@ pub async fn pick_color(
             crate::set_busy(&app, false);
             e.to_string()
         })?;
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.close();
+    }
     let _ = window.set_focus();
     crate::set_busy(&app, false);
     Ok(())

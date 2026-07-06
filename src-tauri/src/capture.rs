@@ -405,11 +405,21 @@ fn capture_window_inner(
     *state.0.lock().unwrap() = Some(png);
     *screen.0.lock().unwrap() = None;
 
+    // Editor first, overlay after: the window count must never hit zero
+    // mid transition. Windows processes the overlay destroy late enough
+    // that the busy flag alone cannot cover the gap.
+    open_editor(app, width, height);
+    close_overlay_refocus_editor(app);
+    Ok(())
+}
+
+fn close_overlay_refocus_editor(app: &AppHandle) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
     }
-    open_editor(app, width, height);
-    Ok(())
+    if let Some(editor) = app.get_webview_window("editor") {
+        let _ = editor.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -496,10 +506,9 @@ fn capture_area_inner(
     let png = encode_png(&crop_rgba, crop_w, crop_h)?;
     *capture.0.lock().unwrap() = Some(png);
 
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        let _ = overlay.close();
-    }
+    // Same ordering rule as capture_window: editor before overlay close.
     open_editor(app, crop_w, crop_h);
+    close_overlay_refocus_editor(app);
     Ok(())
 }
 

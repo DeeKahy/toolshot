@@ -85,12 +85,13 @@ fn main() {
     let mut daemon = Daemon {
         tray: None,
         hotkey_manager,
+        desired: Vec::new(),
         registered: Vec::new(),
         settings_mtime: settings_mtime(),
         session: None,
         settings_child: None,
     };
-    daemon.register_shortcuts();
+    daemon.reload_shortcuts();
 
     event_loop.run_app(&mut daemon).expect("event loop failed");
 }
@@ -98,6 +99,11 @@ fn main() {
 struct Daemon {
     tray: Option<TrayIcon>,
     hotkey_manager: GlobalHotKeyManager,
+    // What the settings file asks for, and what actually stuck. They can
+    // differ transiently: the settings UI test-registers a combo before
+    // saving, and on Windows the OS may not have released it yet when we
+    // first try, so unregistered leftovers are retried every poll tick.
+    desired: Vec<(Action, String)>,
     registered: Vec<(u32, Action, HotKey)>,
     settings_mtime: Option<SystemTime>,
     // One capture/pick/fullscreen session at a time; settings is separate
@@ -107,25 +113,43 @@ struct Daemon {
 }
 
 impl Daemon {
-    fn register_shortcuts(&mut self) {
+    fn reload_shortcuts(&mut self) {
         for (_, _, hk) in self.registered.drain(..) {
             let _ = self.hotkey_manager.unregister(hk);
         }
+        self.desired.clear();
         let settings = load_settings_json();
         for action in [Action::Capture, Action::Fullscreen, Action::Picker] {
-            let Some(accel) = settings
+            if let Some(accel) = settings
                 .as_ref()
                 .and_then(|s| s.get(action.settings_key()))
                 .and_then(|v| v.as_str())
-            else {
+            {
+                self.desired.push((action, accel.to_string()));
+            }
+        }
+        self.register_missing(true);
+    }
+
+    fn register_missing(&mut self, log_errors: bool) {
+        for (action, accel) in self.desired.clone() {
+            if self.registered.iter().any(|(_, a, _)| *a == action) {
                 continue;
-            };
-            match parse_accel(accel) {
+            }
+            match parse_accel(&accel) {
                 Ok(hk) => match self.hotkey_manager.register(hk) {
                     Ok(()) => self.registered.push((hk.id(), action, hk)),
-                    Err(e) => eprintln!("could not register shortcut {accel}: {e}"),
+                    Err(e) => {
+                        if log_errors {
+                            eprintln!("could not register shortcut {accel}, will retry: {e}");
+                        }
+                    }
                 },
-                Err(e) => eprintln!("could not parse shortcut {accel}: {e}"),
+                Err(e) => {
+                    if log_errors {
+                        eprintln!("could not parse shortcut {accel}: {e}");
+                    }
+                }
             }
         }
     }
@@ -240,11 +264,14 @@ impl ApplicationHandler<UserEvent> for Daemon {
             StartCause::Init => self.build_tray(),
             StartCause::ResumeTimeReached { .. } => {
                 // The settings window is a separate process, shortcut
-                // changes arrive by watching the settings file.
+                // changes arrive by watching the settings file. Bindings
+                // that failed to register are retried quietly.
                 let mtime = settings_mtime();
                 if mtime != self.settings_mtime {
                     self.settings_mtime = mtime;
-                    self.register_shortcuts();
+                    self.reload_shortcuts();
+                } else {
+                    self.register_missing(false);
                 }
             }
             _ => {}
