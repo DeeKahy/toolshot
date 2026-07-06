@@ -20,6 +20,14 @@ See [TODO.md](TODO.md) for the roadmap: blur/blackout, text tool, OCR, scrolling
 
 ## Install
 
+### macOS (Homebrew)
+
+```sh
+brew install --cask deekahy/tap/toolshot
+```
+
+Add `--no-quarantine` to skip the Gatekeeper prompt for the unsigned app.
+
 ### macOS (download)
 
 Grab the dmg from the [download page](https://deekahy.github.io/toolshot/) or the [releases](https://github.com/DeeKahy/toolshot/releases), drag Toolshot to Applications.
