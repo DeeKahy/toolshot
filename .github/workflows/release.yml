@@ -63,6 +63,13 @@ jobs:
           </dict>
           </plist>
           EOF
+          # Ad hoc signing, like the Tauri bundler did. Without a bundle
+          # signature TCC cannot match the app across launches, so the
+          # Screen Recording grant never sticks and macOS re-prompts
+          # forever.
+          codesign --force --sign - "$app/MacOS/toolshot-ui"
+          codesign --force --sign - Toolshot.app
+          codesign --verify --verbose Toolshot.app
           mkdir dmg-root
           cp -R Toolshot.app dmg-root/
           ln -s /Applications dmg-root/Applications
