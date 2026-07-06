@@ -228,11 +228,39 @@ fn open_overlay(app: &AppHandle, mode: &str) {
         }
     }
 
-    let _ = window.show();
-    // Accessory apps do not activate on their own, without this the
-    // overlay never sees keyboard events and Esc does nothing.
-    let _ = window.set_focus();
+    if cfg!(target_os = "macos") {
+        let _ = window.show();
+        // Accessory apps do not activate on their own, without this the
+        // overlay never sees keyboard events and Esc does nothing.
+        let _ = window.set_focus();
+    } else {
+        // The window is opaque off macOS, showing it before the frozen
+        // frame has painted flashes black over the screen. The page
+        // calls overlay_ready once the frame (or a notice) is up; the
+        // timer is a safety net so a wedged page cannot leave an
+        // invisible session running.
+        let fallback = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            if !fallback.is_visible().unwrap_or(true) {
+                let _ = fallback.show();
+                let _ = fallback.set_focus();
+            }
+        });
+    }
     crate::set_busy(app, false);
+}
+
+// Called by the overlay page once it has something to show: the frozen
+// frame is painted, or a notice is displayed instead.
+#[tauri::command]
+pub fn overlay_ready(app: AppHandle) {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        if !overlay.is_visible().unwrap_or(false) {
+            let _ = overlay.show();
+            let _ = overlay.set_focus();
+        }
+    }
 }
 
 pub fn capture_fullscreen(app: &AppHandle) {
@@ -338,7 +366,10 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
 }
 
 #[tauri::command]
-pub fn capture_window(
+// Async on purpose: sync commands run on the main thread, and building
+// a webview window there deadlocks WebView2 on Windows into a white
+// window that never loads.
+pub async fn capture_window(
     app: AppHandle,
     state: State<'_, CaptureState>,
     screen: State<'_, ScreenState>,
@@ -404,7 +435,8 @@ pub fn get_screen_rgba(state: State<'_, ScreenState>) -> Result<tauri::ipc::Resp
 // Rect arrives in logical overlay coordinates, cropping happens in the
 // physical pixels of the frozen frame.
 #[tauri::command]
-pub fn capture_area(
+// Async for the same WebView2 reason as capture_window.
+pub async fn capture_area(
     app: AppHandle,
     screen: State<'_, ScreenState>,
     capture: State<'_, CaptureState>,

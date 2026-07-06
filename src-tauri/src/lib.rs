@@ -78,6 +78,7 @@ pub fn run() {
             capture::get_screen_meta,
             capture::get_screen_rgba,
             capture::get_overlay_mode,
+            capture::overlay_ready,
             capture::capture_area,
             capture::cancel_overlay,
             capture::get_capture_png,

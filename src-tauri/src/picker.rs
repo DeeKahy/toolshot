@@ -4,8 +4,11 @@ use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[derive(Default)]
 pub struct PickerState(pub Mutex<Option<(u8, u8, u8)>>);
 
+// Async on purpose: sync commands run on the main thread, and building
+// a webview window there deadlocks WebView2 on Windows into a white
+// window that never loads.
 #[tauri::command]
-pub fn pick_color(
+pub async fn pick_color(
     app: AppHandle,
     state: State<'_, PickerState>,
     screen: State<'_, crate::capture::ScreenState>,

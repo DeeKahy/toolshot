@@ -79,6 +79,8 @@ All cross-window state lives in `tauri::State` mutexes registered in `lib.rs`: `
 
 ### Platform gotchas
 
+- Any command that creates a webview window must be `async fn`. Sync commands run on the main thread, and WebView2 creation there deadlocks on Windows into a white window that never loads (`capture_window`, `capture_area` and `pick_color` are async for exactly this). macOS masks the bug, so it only shows up on Windows hardware.
+- The overlay window is only transparent on macOS (transparent undecorated windows are a WebView2 white-screen trigger). Off macOS it starts hidden and opaque, and the page calls `overlay_ready` once the frozen frame or a notice is painted, with a 1.5s show fallback in Rust. Keep that handshake when touching overlay startup.
 - Without macOS Screen Recording permission, `xcap::Window::all()` returns an error, not an empty list. The overlay checks `check_screen_permission` first and shows instructions. When running the raw dev binary, the TCC grant attaches to the parent terminal, not the app.
 - Accessory apps do not focus their windows automatically. Every window that needs keyboard input calls `set_focus()` after creation, otherwise Esc and shortcuts silently do nothing.
 - The overlay only covers the primary monitor, and macOS Space switching leaves a stale overlay behind (two dismissal approaches failed, see the open issue).

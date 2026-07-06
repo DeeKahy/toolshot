@@ -29,6 +29,16 @@ let dragging = false;
 // capture-mode visuals can never leak into picker mode.
 let mode = null;           // "capture" or "pick" (color picker)
 
+// Off macOS the window starts hidden and opaque; the backend shows it
+// once we report having something on screen, so the frozen frame
+// appears seamlessly instead of flashing black.
+let readySent = false;
+function signalReady() {
+  if (readySent) return;
+  readySent = true;
+  invoke("overlay_ready").catch(() => {});
+}
+
 function showNotice(title, body) {
   notice.innerHTML = "";
   const h = document.createElement("h2");
@@ -38,6 +48,7 @@ function showNotice(title, body) {
   notice.appendChild(h);
   notice.appendChild(p);
   notice.style.display = "block";
+  signalReady();
 }
 
 async function init() {
@@ -78,6 +89,7 @@ async function init() {
     }
     if (!meta) {
       console.error("no frozen screen, loupe and drag disabled");
+      signalReady();
       return;
     }
     try {
@@ -92,6 +104,7 @@ async function init() {
     } catch (e) {
       console.error("failed to load frozen screen", e);
     }
+    signalReady();
   })();
 
   if (mode === "pick") return;
