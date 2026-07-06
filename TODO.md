@@ -24,3 +24,11 @@ This file keeps the history of what has landed.
 - [x] Fullscreen capture: tray menu item and a recordable global shortcut, opens straight in the editor
 - [x] Editor: blur tool (mosaic pixelation, also covers annotations drawn under it)
 - [x] Editor: crop tool with dimmed selection preview, non-destructive and undoable
+- [x] Editor: pretty mode toggle, gradient padding with rounded corners and drop shadow composited on copy
+- [x] Editor: six gradient presets for pretty mode; gradient, toggle and annotation color persist across captures
+- [x] Editor: auto gradient (default) sampled from the screenshot's own dominant colors
+- [x] Editor: annotations always render above blurs and above the pretty border, arrows can overhang the padding
+- [x] Editor: pretty framing is drawn on the working canvas itself, the preview and the copy are the same pixels
+- [x] Memory: frozen screen frame and capture PNG are dropped as soon as the overlay / editor is done with them
+- [x] Frontend split into markup-only HTML plus per-page files under src/css/ and src/js/, shared css/base.css
+- [x] Memory: resident process split into a tiny tray/hotkey daemon (about 12MB) that spawns a per-session Tauri UI process, all capture and webview memory is returned on close

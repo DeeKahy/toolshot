@@ -1,0 +1,23 @@
+# The resident tray process. Keep this dependency list as small as it
+# can possibly be: every crate added here is RAM spent 24/7, while the
+# heavyweight UI lives in the spawned toolshot-ui (Tauri) process.
+
+[package]
+name = "toolshot-daemon"
+version = "0.1.0"
+description = "Tiny resident tray and hotkey daemon that spawns the Toolshot UI"
+authors = ["deekahy"]
+license = "GPL-3.0-only"
+edition = "2021"
+
+[[bin]]
+name = "toolshot"
+path = "src/main.rs"
+
+[dependencies]
+tray-icon = "0.19"
+global-hotkey = "0.6"
+winit = "0.30"
+dirs = "6"
+serde_json = "1"
+png = "0.17"

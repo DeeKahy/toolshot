@@ -8,11 +8,18 @@ pub struct PickerState(pub Mutex<Option<(u8, u8, u8)>>);
 pub fn pick_color(
     app: AppHandle,
     state: State<'_, PickerState>,
+    screen: State<'_, crate::capture::ScreenState>,
     r: u8,
     g: u8,
     b: u8,
 ) -> Result<(), String> {
     *state.0.lock().unwrap() = Some((r, g, b));
+    // The color came from the frozen frame, which is done now.
+    *screen.0.lock().unwrap() = None;
+
+    // Closing the overlay before the popup exists must not end the
+    // process.
+    crate::set_busy(&app, true);
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
@@ -31,8 +38,12 @@ pub fn pick_color(
         .center()
         .focused(true)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            crate::set_busy(&app, false);
+            e.to_string()
+        })?;
     let _ = window.set_focus();
+    crate::set_busy(&app, false);
     Ok(())
 }
 

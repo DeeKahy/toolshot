@@ -17,9 +17,9 @@
           pname = "toolshot";
           version = "0.1.0";
           src = ./.;
-          cargoRoot = "src-tauri";
-          buildAndTestSubdir = "src-tauri";
-          cargoLock.lockFile = ./src-tauri/Cargo.lock;
+          # Workspace build: the toolshot daemon and the toolshot-ui
+          # Tauri app, both installed side by side.
+          cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.pkg-config pkgs.wrapGAppsHook3 ];
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.gtk3
@@ -34,11 +34,14 @@
           ];
           doCheck = false;
 
-          # A real .app bundle so Spotlight and Launchpad can find it.
+          # A real .app bundle so Spotlight and Launchpad can find it. The
+          # bundle executable is the tray daemon, which spawns the UI
+          # binary sitting next to it.
           postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
             app="$out/Applications/Toolshot.app/Contents"
             mkdir -p "$app/MacOS" "$app/Resources"
             cp "$out/bin/toolshot" "$app/MacOS/toolshot"
+            cp "$out/bin/toolshot-ui" "$app/MacOS/toolshot-ui"
             cp ${./src-tauri/icons/icon.icns} "$app/Resources/icon.icns"
             cat > "$app/Info.plist" <<'EOF'
             <?xml version="1.0" encoding="UTF-8"?>

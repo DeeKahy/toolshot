@@ -81,12 +81,11 @@ Everything comes from the flake:
 
 ```sh
 nix develop
-cd src-tauri
 cargo build
 ./target/debug/toolshot
 ```
 
-Without nix: install a Rust toolchain and Node.js, then `npm install && npm run tauri dev`.
+Without nix: install a Rust toolchain and run `cargo build`. The workspace builds two binaries: `toolshot`, the tiny tray daemon that stays resident, and `toolshot-ui`, the Tauri app it spawns for each capture, edit or settings session.
 
 ## Updates
 
@@ -94,8 +93,9 @@ Toolshot checks for updates only when you ask it to: Settings, "Check for update
 
 ## Layout
 
+- `daemon/` the resident tray and hotkey process, kept as small as possible
 - `src/` static frontend pages, no build step (overlay, editor, color popup, settings)
-- `src-tauri/src/` Rust backend: tray, capture, clipboard, shortcuts, settings
+- `src-tauri/src/` Rust backend for UI sessions: capture, clipboard, shortcuts, settings
 - `docs/` the GitHub Pages download site
 - `.github/workflows/` release CI building macOS, Linux and Windows artifacts
 

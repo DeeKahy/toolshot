@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -35,40 +34,11 @@ fn save_settings(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
-fn register_shortcut(app: &AppHandle, kind: &str, accel: &str) -> Result<(), String> {
-    let kind = kind.to_string();
-    app.global_shortcut()
-        .on_shortcut(accel, move |app, _shortcut, event| {
-            if event.state() == ShortcutState::Pressed {
-                match kind.as_str() {
-                    "capture" => crate::capture::start_window_pick(app),
-                    "fullscreen" => crate::capture::capture_fullscreen(app),
-                    "picker" => crate::capture::start_color_pick(app),
-                    _ => {}
-                }
-            }
-        })
-        .map_err(|e| e.to_string())
-}
-
-// Called once at startup: load persisted settings and arm the shortcuts.
+// Called once at startup. The daemon owns the live shortcuts and reloads
+// them when the settings file changes, this process only reads and edits
+// the file.
 pub fn init(app: &AppHandle) {
     let settings = load_settings(app);
-    if let Some(accel) = &settings.capture_shortcut {
-        if let Err(e) = register_shortcut(app, "capture", accel) {
-            eprintln!("could not register capture shortcut {accel}: {e}");
-        }
-    }
-    if let Some(accel) = &settings.fullscreen_shortcut {
-        if let Err(e) = register_shortcut(app, "fullscreen", accel) {
-            eprintln!("could not register fullscreen shortcut {accel}: {e}");
-        }
-    }
-    if let Some(accel) = &settings.picker_shortcut {
-        if let Err(e) = register_shortcut(app, "picker", accel) {
-            eprintln!("could not register picker shortcut {accel}: {e}");
-        }
-    }
     app.manage(SettingsState(Mutex::new(settings)));
 }
 
@@ -89,7 +59,10 @@ pub fn open_settings_window(app: &AppHandle) {
         Ok(window) => {
             let _ = window.set_focus();
         }
-        Err(e) => eprintln!("failed to open settings: {e}"),
+        Err(e) => {
+            eprintln!("failed to open settings: {e}");
+            app.exit(1);
+        }
     }
 }
 
@@ -98,7 +71,8 @@ pub fn get_settings(state: State<'_, SettingsState>) -> Settings {
     state.0.lock().unwrap().clone()
 }
 
-// kind is "capture" or "picker"; accel of None clears the binding.
+// kind is "capture", "fullscreen" or "picker"; accel of None clears the
+// binding.
 #[tauri::command]
 pub fn set_shortcut(
     app: AppHandle,
@@ -116,13 +90,18 @@ pub fn set_shortcut(
         }
     };
 
-    if let Some(old) = old {
-        let _ = app.global_shortcut().unregister(old.as_str());
-    }
-
-    // Register first so an invalid or taken combo never gets persisted.
+    // Validate by registering once and letting go again, so an invalid
+    // or taken combo never gets persisted. The daemon picks up the saved
+    // file and does the real registration. Re-recording the unchanged
+    // combo skips the test, the daemon itself still holds it.
     if let Some(accel) = &accel {
-        register_shortcut(&app, &kind, accel)?;
+        if old.as_deref() != Some(accel.as_str()) {
+            let shortcuts = app.global_shortcut();
+            shortcuts
+                .register(accel.as_str())
+                .map_err(|e| e.to_string())?;
+            let _ = shortcuts.unregister(accel.as_str());
+        }
     }
 
     let mut settings = state.0.lock().unwrap();
@@ -135,14 +114,31 @@ pub fn set_shortcut(
     save_settings(&app, &settings)
 }
 
-#[tauri::command]
-pub fn get_autostart(app: AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+// Autostart must launch the resident daemon, not this UI binary. The
+// daemon sits next to us: both in target/ during dev and in the app
+// bundle's MacOS dir.
+fn autolaunch() -> Result<auto_launch::AutoLaunch, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or_else(|| "no exe dir".to_string())?;
+    let daemon = dir.join(if cfg!(windows) { "toolshot.exe" } else { "toolshot" });
+    auto_launch::AutoLaunchBuilder::new()
+        .set_app_name("Toolshot")
+        .set_app_path(&daemon.to_string_lossy())
+        .set_use_launch_agent(true)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let manager = app.autolaunch();
+pub fn get_autostart() -> bool {
+    autolaunch()
+        .map(|a| a.is_enabled().unwrap_or(false))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    let manager = autolaunch()?;
     if enabled {
         manager.enable().map_err(|e| e.to_string())
     } else {

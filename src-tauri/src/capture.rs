@@ -155,10 +155,16 @@ pub fn start_color_pick(app: &AppHandle) {
 fn open_overlay(app: &AppHandle, mode: &str) {
     if let Some(existing) = app.get_webview_window("overlay") {
         let _ = existing.close();
+        // The frozen frame is a full monitor of raw RGBA, tens of MB on
+        // retina screens. Never keep it alive without an overlay using it.
+        *app.state::<ScreenState>().0.lock().unwrap() = None;
         return;
     }
 
     *app.state::<OverlayMode>().0.lock().unwrap() = mode.to_string();
+
+    // Window churn below must not count as the session ending.
+    crate::set_busy(app, true);
 
     // A lingering editor window would end up in the frozen frame.
     if let Some(editor) = app.get_webview_window("editor") {
@@ -202,6 +208,7 @@ fn open_overlay(app: &AppHandle, mode: &str) {
         Ok(window) => window,
         Err(e) => {
             eprintln!("failed to open overlay: {e}");
+            app.exit(1);
             return;
         }
     };
@@ -221,9 +228,14 @@ fn open_overlay(app: &AppHandle, mode: &str) {
     // Accessory apps do not activate on their own, without this the
     // overlay never sees keyboard events and Esc does nothing.
     let _ = window.set_focus();
+    crate::set_busy(app, false);
 }
 
 pub fn capture_fullscreen(app: &AppHandle) {
+    // The capture runs with zero windows open, keep the process alive
+    // until the editor exists.
+    crate::set_busy(app, true);
+
     // A lingering overlay or editor window would end up in the frame.
     let mut closed_window = false;
     if let Some(overlay) = app.get_webview_window("overlay") {
@@ -240,6 +252,7 @@ pub fn capture_fullscreen(app: &AppHandle) {
     std::thread::spawn(move || {
         if !screen_access::granted() && !screen_access::request() {
             eprintln!("screen recording permission not granted");
+            app.exit(1);
             return;
         }
 
@@ -250,7 +263,10 @@ pub fn capture_fullscreen(app: &AppHandle) {
 
         let monitor = match app.primary_monitor() {
             Ok(Some(m)) => m,
-            _ => return,
+            _ => {
+                app.exit(1);
+                return;
+            }
         };
         let scale = monitor.scale_factor();
         let pos = monitor.position().to_logical::<f64>(scale);
@@ -259,6 +275,7 @@ pub fn capture_fullscreen(app: &AppHandle) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("fullscreen capture failed: {e}");
+                app.exit(1);
                 return;
             }
         };
@@ -266,6 +283,7 @@ pub fn capture_fullscreen(app: &AppHandle) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("failed to encode fullscreen capture: {e}");
+                app.exit(1);
                 return;
             }
         };
@@ -319,6 +337,23 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
 pub fn capture_window(
     app: AppHandle,
     state: State<'_, CaptureState>,
+    screen: State<'_, ScreenState>,
+    id: u32,
+) -> Result<(), String> {
+    // Closing the overlay before the editor exists must not end the
+    // process. On errors the overlay stays open, so busy comes back off.
+    crate::set_busy(&app, true);
+    let result = capture_window_inner(&app, &state, &screen, id);
+    if result.is_err() {
+        crate::set_busy(&app, false);
+    }
+    result
+}
+
+fn capture_window_inner(
+    app: &AppHandle,
+    state: &State<'_, CaptureState>,
+    screen: &State<'_, ScreenState>,
     id: u32,
 ) -> Result<(), String> {
     let windows = xcap::Window::all().map_err(|e| e.to_string())?;
@@ -333,11 +368,12 @@ pub fn capture_window(
     let png = encode_png(&rgba, width, height)?;
 
     *state.0.lock().unwrap() = Some(png);
+    *screen.0.lock().unwrap() = None;
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
     }
-    open_editor(&app, width, height);
+    open_editor(app, width, height);
     Ok(())
 }
 
@@ -373,6 +409,24 @@ pub fn capture_area(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    crate::set_busy(&app, true);
+    let result = capture_area_inner(&app, &screen, &capture, x, y, width, height);
+    if result.is_err() {
+        crate::set_busy(&app, false);
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_area_inner(
+    app: &AppHandle,
+    screen: &State<'_, ScreenState>,
+    capture: &State<'_, CaptureState>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
     let (crop_rgba, crop_w, crop_h) = {
         let guard = screen.0.lock().unwrap();
         let frozen = guard.as_ref().ok_or_else(|| "no frozen screen".to_string())?;
@@ -399,13 +453,17 @@ pub fn capture_area(
         (crop_rgba, crop_w, crop_h)
     };
 
+    // The full frozen frame has served its purpose, free the tens of MB
+    // instead of letting them idle until the next capture.
+    *screen.0.lock().unwrap() = None;
+
     let png = encode_png(&crop_rgba, crop_w, crop_h)?;
     *capture.0.lock().unwrap() = Some(png);
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
     }
-    open_editor(&app, crop_w, crop_h);
+    open_editor(app, crop_w, crop_h);
     Ok(())
 }
 
@@ -436,13 +494,18 @@ fn open_editor(app: &AppHandle, img_width: u32, img_height: u32) {
     match result {
         Ok(window) => {
             let _ = window.set_focus();
+            crate::set_busy(app, false);
         }
-        Err(e) => eprintln!("failed to open editor: {e}"),
+        Err(e) => {
+            eprintln!("failed to open editor: {e}");
+            app.exit(1);
+        }
     }
 }
 
 #[tauri::command]
-pub fn cancel_overlay(app: AppHandle) {
+pub fn cancel_overlay(app: AppHandle, screen: State<'_, ScreenState>) {
+    *screen.0.lock().unwrap() = None;
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
     }
@@ -458,7 +521,11 @@ pub fn get_capture_png(state: State<'_, CaptureState>) -> Result<String, String>
 // The editor sends the composited canvas (image plus annotations) as one
 // raw payload: width and height as little endian u32s, then RGBA bytes.
 #[tauri::command]
-pub fn copy_annotated(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+pub fn copy_annotated(
+    app: AppHandle,
+    capture: State<'_, CaptureState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw payload".to_string());
     };
@@ -482,6 +549,7 @@ pub fn copy_annotated(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resul
         })
         .map_err(|e| e.to_string())?;
 
+    *capture.0.lock().unwrap() = None;
     if let Some(editor) = app.get_webview_window("editor") {
         let _ = editor.close();
     }
@@ -489,7 +557,8 @@ pub fn copy_annotated(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resul
 }
 
 #[tauri::command]
-pub fn close_editor(app: AppHandle) {
+pub fn close_editor(app: AppHandle, capture: State<'_, CaptureState>) {
+    *capture.0.lock().unwrap() = None;
     if let Some(editor) = app.get_webview_window("editor") {
         let _ = editor.close();
     }
