@@ -48,7 +48,10 @@ jobs:
             libclang-dev \
             libxcb1-dev \
             libxcb-randr0-dev \
-            libxcb-shm0-dev
+            libxcb-shm0-dev \
+            libgbm-dev \
+            libegl1-mesa-dev \
+            libwayland-dev
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -66,3 +69,14 @@ jobs:
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'beta') }}
           args: ${{ matrix.args }}
+
+      # A version-free asset name so the Homebrew cask can always point at
+      # releases/latest/download without needing a bump per release.
+      - name: Upload stable-name dmg
+        if: matrix.platform == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dmg=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)
+          cp "$dmg" Toolshot_universal.dmg
+          gh release upload "${{ github.ref_name }}" Toolshot_universal.dmg --clobber
