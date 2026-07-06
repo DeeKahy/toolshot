@@ -21,3 +21,6 @@ This file keeps the history of what has landed.
 - [x] Nix flake with dev shell and package output (macOS app bundle included)
 - [x] GitHub release CI for macOS, Linux and Windows, download site on GitHub Pages
 - [x] Homebrew tap (DeeKahy/homebrew-tap) with a self-updating cask
+- [x] Fullscreen capture: tray menu item and a recordable global shortcut, opens straight in the editor
+- [x] Editor: blur tool (mosaic pixelation, also covers annotations drawn under it)
+- [x] Editor: crop tool with dimmed selection preview, non-destructive and undoable

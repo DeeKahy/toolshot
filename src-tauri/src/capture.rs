@@ -223,6 +223,57 @@ fn open_overlay(app: &AppHandle, mode: &str) {
     let _ = window.set_focus();
 }
 
+pub fn capture_fullscreen(app: &AppHandle) {
+    // A lingering overlay or editor window would end up in the frame.
+    let mut closed_window = false;
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.close();
+        closed_window = true;
+    }
+    if let Some(editor) = app.get_webview_window("editor") {
+        let _ = editor.hide();
+        let _ = editor.close();
+        closed_window = true;
+    }
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if !screen_access::granted() && !screen_access::request() {
+            eprintln!("screen recording permission not granted");
+            return;
+        }
+
+        // Give the tray menu and any just-closed windows time to leave
+        // the screen before the frame is grabbed.
+        let delay = if closed_window { 250 } else { 150 };
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+
+        let monitor = match app.primary_monitor() {
+            Ok(Some(m)) => m,
+            _ => return,
+        };
+        let scale = monitor.scale_factor();
+        let pos = monitor.position().to_logical::<f64>(scale);
+
+        let frozen = match freeze_screen(pos.x, pos.y, 0.0) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("fullscreen capture failed: {e}");
+                return;
+            }
+        };
+        let png = match encode_png(&frozen.rgba, frozen.width, frozen.height) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("failed to encode fullscreen capture: {e}");
+                return;
+            }
+        };
+        *app.state::<CaptureState>().0.lock().unwrap() = Some(png);
+        open_editor(&app, frozen.width, frozen.height);
+    });
+}
+
 #[tauri::command]
 pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
     let windows = xcap::Window::all().map_err(|e| e.to_string())?;
