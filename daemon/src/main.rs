@@ -1,3 +1,6 @@
+// Prevents an extra console window on Windows in release.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // The resident process: a winit event loop with no windows, holding the
 // tray icon and global shortcuts. Everything the user sees is the
 // spawned toolshot-ui (Tauri) process, launched per session and gone
@@ -50,6 +53,16 @@ impl Action {
 }
 
 fn main() {
+    // Double-clicking the app while the daemon runs must not produce a
+    // second tray icon. The lock lives for the process lifetime.
+    let _lock = match acquire_instance_lock() {
+        Some(lock) => lock,
+        None => {
+            eprintln!("toolshot daemon already running");
+            return;
+        }
+    };
+
     let mut builder = EventLoop::<UserEvent>::with_user_event();
     #[cfg(target_os = "macos")]
     {
@@ -303,8 +316,26 @@ fn child_alive(child: &mut Option<Child>) -> bool {
     }
 }
 
+fn config_dir() -> Option<PathBuf> {
+    let dir = dirs::config_dir()?.join("dev.deekahy.toolshot");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+fn acquire_instance_lock() -> Option<std::fs::File> {
+    use fs2::FileExt;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(config_dir()?.join("daemon.lock"))
+        .ok()?;
+    file.try_lock_exclusive().ok()?;
+    Some(file)
+}
+
 fn settings_path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("dev.deekahy.toolshot").join("settings.json"))
+    Some(config_dir()?.join("settings.json"))
 }
 
 fn settings_mtime() -> Option<SystemTime> {

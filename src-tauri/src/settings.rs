@@ -114,13 +114,9 @@ pub fn set_shortcut(
     save_settings(&app, &settings)
 }
 
-// Autostart must launch the resident daemon, not this UI binary. The
-// daemon sits next to us: both in target/ during dev and in the app
-// bundle's MacOS dir.
+// Autostart must launch the resident daemon, not this UI binary.
 fn autolaunch() -> Result<auto_launch::AutoLaunch, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe.parent().ok_or_else(|| "no exe dir".to_string())?;
-    let daemon = dir.join(if cfg!(windows) { "toolshot.exe" } else { "toolshot" });
+    let daemon = crate::daemon_path()?;
     auto_launch::AutoLaunchBuilder::new()
         .set_app_name("Toolshot")
         .set_app_path(&daemon.to_string_lossy())

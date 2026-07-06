@@ -192,7 +192,11 @@ fn open_overlay(app: &AppHandle, mode: &str) {
         .position(pos.x, pos.y)
         .inner_size(size.width, size.height)
         .decorations(false)
-        .transparent(true)
+        // The frozen frame canvas covers the window, so transparency is
+        // cosmetic (it hides the instant before the frame paints). Only
+        // macOS gets it: transparent undecorated windows are a known
+        // white-screen trigger for WebView2 on Windows.
+        .transparent(cfg!(target_os = "macos"))
         .shadow(false)
         .always_on_top(true)
         .resizable(false)

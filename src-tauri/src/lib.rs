@@ -19,8 +19,50 @@ pub fn set_busy(app: &tauri::AppHandle, busy: bool) {
     app.state::<Busy>().0.store(busy, Ordering::SeqCst);
 }
 
+// The daemon sits next to this binary: in target/ during dev, in the
+// bundle's binary dir when installed (Tauri ships it as a sidecar).
+pub fn daemon_path() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or_else(|| "no exe dir".to_string())?;
+    Ok(dir.join(if cfg!(windows) { "toolshot.exe" } else { "toolshot" }))
+}
+
+// Launched with no argument (double click, Start Menu, login item):
+// hand off to the resident daemon and get out of the way before any
+// webview machinery starts. This keeps the Tauri binary as the bundle
+// entry point for the platform installers while the daemon stays the
+// only resident process.
+fn launch_daemon() {
+    let daemon = match daemon_path() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("daemon not found: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(&daemon).exec();
+        eprintln!("failed to exec {}: {err}", daemon.display());
+        std::process::exit(1);
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(e) = std::process::Command::new(&daemon).spawn() {
+            eprintln!("failed to start {}: {e}", daemon.display());
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let mode = std::env::args().nth(1).unwrap_or_default();
+    if mode.is_empty() {
+        launch_daemon();
+        return;
+    }
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -65,7 +107,8 @@ pub fn run() {
                 "pick" => capture::start_color_pick(&handle),
                 "fullscreen" => capture::capture_fullscreen(&handle),
                 "settings" => settings::open_settings_window(&handle),
-                _ => {
+                other => {
+                    eprintln!("unknown mode: {other}");
                     eprintln!("usage: toolshot-ui <capture|pick|fullscreen|settings>");
                     std::process::exit(2);
                 }

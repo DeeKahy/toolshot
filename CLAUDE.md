@@ -35,11 +35,11 @@ Push a tag to build and publish all platforms:
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-`.github/workflows/release.yml` builds a universal macOS dmg (both binaries lipo'd, bundle assembled in the workflow, no tauri-action since it cannot inject the daemon), a Linux x86_64 tarball, and a Windows zip. Tags containing `beta` publish as prereleases. The macOS job also uploads a version-free `Toolshot_universal.dmg` that the Homebrew cask at DeeKahy/homebrew-tap points to via `releases/latest/download`, so brew needs no bump per release. The download site in `docs/` (GitHub Pages, deployed by `pages.yml`) reads the releases API client-side.
+`.github/workflows/release.yml` builds a universal macOS dmg (both binaries lipo'd, bundle assembled in the workflow with the daemon as the bundle executable), and Linux AppImage/deb/rpm plus Windows NSIS/MSI via `npx tauri build`. On those platforms the daemon ships as a Tauri sidecar: the CI copies it to `src-tauri/binaries/toolshot-<triple>` and passes `--config src-tauri/tauri.sidecar.conf.json`, which adds `bundle.externalBin`. That overlay exists because `tauri-build` refuses to compile when an externalBin file is missing, and local builds should not need a pre-staged daemon. The installed entry point everywhere is the Tauri binary with no arguments, which execs/spawns the daemon before any webview starts (`launch_daemon` in `lib.rs`); the daemon holds a lock file so double launches do not create a second tray icon.
 
-The Tauri-era AppImage/deb/rpm and Windows installers are gone since tauri-action was dropped; the workflow has not been exercised since the daemon split, treat the first tagged release as a test run.
+Tags containing `beta` publish as prereleases. The macOS job also uploads a version-free `Toolshot_universal.dmg` that the Homebrew cask at DeeKahy/homebrew-tap points to via `releases/latest/download`, so brew needs no bump per release. The download site in `docs/` (GitHub Pages, deployed by `pages.yml`) reads the releases API client-side.
 
-Version lives in four places that must stay in sync: `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `daemon/Cargo.toml`, and `flake.nix`.
+Version lives in five places that must stay in sync: `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `daemon/Cargo.toml`, `package.json`, and `flake.nix` (twice, package version and the Info.plist).
 
 ## Architecture
 

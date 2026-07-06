@@ -41,6 +41,11 @@ function showNotice(title, body) {
 }
 
 async function init() {
+  // The window is only transparent on macOS. Elsewhere paint black so
+  // an opaque window never flashes the webview's white default.
+  if (!navigator.platform.toUpperCase().includes("MAC")) {
+    document.documentElement.style.background = "#000";
+  }
   mode = await invoke("get_overlay_mode").catch(() => "capture");
   if (mode === "pick") {
     // The frozen frame shows through untinted, the screen looks normal.
