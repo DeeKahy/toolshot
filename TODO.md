@@ -34,3 +34,17 @@ This file keeps the history of what has landed.
 - [x] Memory: resident process split into a tiny tray/hotkey daemon (about 12MB) that spawns a per-session Tauri UI process, all capture and webview memory is returned on close
 - [x] Editor: view zoom and pan (Cmd+scroll or pinch to zoom, scroll / Space+drag / middle-drag to pan, Cmd+0 or click the readout to fit), display only, the copied pixels are untouched
 - [x] Editor: output size selector on copy (0.5x to 4x), nearest neighbor upscaling so small captures get bigger without going blurry
+- [x] Editor: undo/redo backed by a command stack (Cmd+Z / Cmd+Shift+Z / Cmd+Y), replacing the pop-only history
+- [x] Editor: freeform pen tool
+- [x] Editor: text tool with an inline editor that bakes into the copied pixels
+- [x] Editor: numbered step badges that auto-increment and renumber on undo
+- [x] Editor: blackout tool, a solid redaction bar alongside the mosaic blur
+- [x] Editor: eyedropper that picks a color from the screenshot into the annotation swatch
+- [x] Editor: save to a PNG file (Cmd+S) via a native save dialog, next to copy-to-clipboard
+- [x] Editor: front end split into geometry / history / shapes ES modules so tools share one coordinate and undo model
+- [x] Capture opens on the monitor under the cursor (overlay, fullscreen and editor) instead of always the primary
+- [x] BusyGuard RAII replaces the manual busy flag protocol, so no failure path can leave an invisible process
+- [x] Capture PNG travels to the editor as raw bytes over binary IPC, dropping the base64/JSON detour
+- [x] Both processes redirect stderr to a rotating log file in the config dir, openable from Settings > View log
+- [x] Tests: Rust unit tests (crop bounds, payload parsing, png roundtrip, accelerator parsing) and Node tests for the editor geometry, history and shape math (`cargo test`, `npm test`)
+- [x] Release CI gates on a version-sync check across all five version locations (`scripts/check-versions.sh`)
