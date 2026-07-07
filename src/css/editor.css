@@ -50,6 +50,25 @@
 
 #toolbar .spacer { flex: 1; }
 
+/* Zoom readout, fixed width so Fit / 240% does not shift the toolbar. */
+#zoomBtn {
+  min-width: 34px;
+  text-align: center;
+}
+
+#exportScale {
+  font-size: 12px;
+  color: #ddd;
+  background: #2a2b30;
+  border: 1px solid #34353c;
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+#exportScale:hover { background: #33343a; }
+
 #toolbar button.primary {
   font-size: 12px;
   color: #ddd;
@@ -71,6 +90,11 @@
   padding: 16px;
   min-height: 0;
 }
+
+#stage.pan-ready { cursor: grab; }
+#stage.pan-ready #shot { cursor: grab; }
+#stage.panning { cursor: grabbing; }
+#stage.panning #shot { cursor: grabbing; }
 
 /* Gradient swatches for pretty mode, shown only while it is on. */
 #gradients {

@@ -1,8 +1,7 @@
 const invoke = window.__TAURI__.core.invoke;
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 if (!isMac) {
-  document.getElementById("modKey").textContent = "Ctrl";
-  document.getElementById("modKey2").textContent = "Ctrl";
+  for (const el of document.querySelectorAll(".modKey")) el.textContent = "Ctrl";
 }
 
 const canvas = document.getElementById("shot");
@@ -11,6 +10,8 @@ const colorInput = document.getElementById("color");
 const stage = document.getElementById("stage");
 const prettyBtn = document.getElementById("prettyBtn");
 const gradientsEl = document.getElementById("gradients");
+const zoomBtn = document.getElementById("zoomBtn");
+const scaleSelect = document.getElementById("exportScale");
 
 const GRADIENTS = [
   { name: "Auto (from screenshot)", auto: true },
@@ -159,17 +160,123 @@ function margin() {
   return pretty ? prettyPad() : 0;
 }
 
+// View zoom and pan are display-only: they change the canvas CSS size and
+// a translate, never the canvas bitmap, so the copied pixels are untouched.
+// viewZoom is relative to the fit scale, 1 = the whole image fits the stage.
+let viewZoom = 1;
+let panX = 0;
+let panY = 0;
+let fitScale = 1;
+const MAX_ZOOM = 12;
+
 // The canvas bitmap is view-sized (plus pretty padding), this only picks
-// its display size so it fits the stage.
+// its display size so it fits the stage, times the user zoom.
 function layout() {
   if (!image) return;
   const availW = stage.clientWidth - 32;
   const availH = stage.clientHeight - 32;
-  const scale = Math.min(availW / canvas.width, availH / canvas.height, 1);
-  canvas.style.width = Math.max(1, Math.floor(canvas.width * scale)) + "px";
-  canvas.style.height = Math.max(1, Math.floor(canvas.height * scale)) + "px";
+  fitScale = Math.min(availW / canvas.width, availH / canvas.height, 1);
+  applyView();
 }
 window.addEventListener("resize", layout);
+
+function applyView() {
+  const w = Math.max(1, canvas.width * fitScale * viewZoom);
+  const h = Math.max(1, canvas.height * fitScale * viewZoom);
+  // Keep the canvas from being panned fully out of the stage: once an
+  // edge reaches the matching stage edge, stop.
+  const maxX = Math.max(0, (w - stage.clientWidth) / 2);
+  const maxY = Math.max(0, (h - stage.clientHeight) / 2);
+  panX = Math.min(maxX, Math.max(-maxX, panX));
+  panY = Math.min(maxY, Math.max(-maxY, panY));
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  canvas.style.transform = "translate(" + panX + "px, " + panY + "px)";
+  zoomBtn.textContent =
+    viewZoom === 1 ? "Fit" : Math.round(fitScale * viewZoom * 100) + "%";
+}
+
+// Zoom keeping the stage-center point fixed. The canvas is flex-centered,
+// so scaling the pan by the same factor as the size does exactly that.
+function zoomBy(factor) {
+  const prev = viewZoom;
+  viewZoom = Math.min(MAX_ZOOM, Math.max(1, viewZoom * factor));
+  if (viewZoom === 1) {
+    panX = 0;
+    panY = 0;
+  } else {
+    panX *= viewZoom / prev;
+    panY *= viewZoom / prev;
+  }
+  applyView();
+}
+
+// Zoom keeping the point under the cursor fixed.
+function zoomAt(factor, cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  const fx = (cx - r.left) / r.width;
+  const fy = (cy - r.top) / r.height;
+  const prev = viewZoom;
+  viewZoom = Math.min(MAX_ZOOM, Math.max(1, viewZoom * factor));
+  if (viewZoom === 1) {
+    panX = 0;
+    panY = 0;
+  } else if (viewZoom !== prev) {
+    const sr = stage.getBoundingClientRect();
+    const w = canvas.width * fitScale * viewZoom;
+    const h = canvas.height * fitScale * viewZoom;
+    panX = cx - (sr.left + sr.width / 2) - (fx - 0.5) * w;
+    panY = cy - (sr.top + sr.height / 2) - (fy - 0.5) * h;
+  }
+  applyView();
+}
+
+function resetView() {
+  viewZoom = 1;
+  panX = 0;
+  panY = 0;
+  applyView();
+}
+
+zoomBtn.addEventListener("click", resetView);
+
+stage.addEventListener(
+  "wheel",
+  (e) => {
+    if (!image) return;
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      // Mouse wheel with the modifier, or a trackpad pinch (which the
+      // webview reports as ctrl+wheel).
+      zoomAt(Math.exp(-e.deltaY * 0.0022), e.clientX, e.clientY);
+    } else {
+      panX -= e.deltaX;
+      panY -= e.deltaY;
+      applyView();
+    }
+  },
+  { passive: false }
+);
+
+// Panning by drag: middle mouse anywhere, or hold Space and drag.
+let panDrag = null;
+let spaceHeld = false;
+
+stage.addEventListener("mousedown", (e) => {
+  if (!image) return;
+  if (e.button === 1 || (spaceHeld && e.button === 0)) {
+    e.preventDefault();
+    panDrag = { x: e.clientX, y: e.clientY };
+    stage.classList.add("panning");
+  }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.key === " ") {
+    spaceHeld = false;
+    stage.classList.remove("pan-ready");
+  }
+});
 
 function gradientColors() {
   const g = GRADIENTS[gradientIndex];
@@ -284,7 +391,13 @@ function setCanvasSize() {
   const m = margin();
   canvas.width = v.w + m * 2;
   canvas.height = v.h + m * 2;
+  // The bitmap just changed shape (crop, pretty toggle), a stale zoom
+  // and pan would point at nothing recognizable.
+  viewZoom = 1;
+  panX = 0;
+  panY = 0;
   layout();
+  updateScaleTitle();
 }
 
 function redraw() {
@@ -370,12 +483,19 @@ prettyBtn.addEventListener("click", () => {
 });
 
 canvas.addEventListener("mousedown", (e) => {
-  if (!tool || !image || e.button !== 0) return;
+  if (!tool || !image || e.button !== 0 || spaceHeld || panDrag) return;
   const p = canvasPos(e);
   draft = { kind: tool, color: colorInput.value, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
 });
 
 window.addEventListener("mousemove", (e) => {
+  if (panDrag) {
+    panX += e.clientX - panDrag.x;
+    panY += e.clientY - panDrag.y;
+    panDrag = { x: e.clientX, y: e.clientY };
+    applyView();
+    return;
+  }
   if (!draft) return;
   const p = canvasPos(e);
   draft.x1 = p.x;
@@ -400,6 +520,11 @@ function applyCrop(d) {
 }
 
 window.addEventListener("mouseup", () => {
+  if (panDrag) {
+    panDrag = null;
+    stage.classList.remove("panning");
+    return;
+  }
   if (!draft) return;
   const tiny = Math.abs(draft.x1 - draft.x0) < 3 && Math.abs(draft.y1 - draft.y0) < 3;
   if (draft.kind === "crop") {
@@ -435,15 +560,53 @@ function roundedRect(c, x, y, w, h, r) {
   c.closePath();
 }
 
+// Output scale, applied only at copy time so the working canvas stays 1:1
+// with the capture. Never persisted, it is a per-shot decision.
+function exportScale() {
+  let s = parseFloat(scaleSelect.value);
+  if (!(s > 0)) s = 1;
+  // Stay inside canvas size limits, a 4x retina fullscreen would blow past
+  // the roughly 16k per-side ceiling and drawImage would silently no-op.
+  const limit = 16000 / Math.max(canvas.width, canvas.height);
+  return Math.min(s, Math.max(1, limit));
+}
+
+function updateScaleTitle() {
+  if (!image) return;
+  const s = exportScale();
+  scaleSelect.title =
+    "Copied size: " +
+    Math.round(canvas.width * s) + " x " + Math.round(canvas.height * s) + " px";
+}
+scaleSelect.addEventListener("change", updateScaleTitle);
+
 // What you see is what gets copied: the working canvas already contains
-// the pretty framing when it is on.
+// the pretty framing when it is on. A non-1x scale resizes those exact
+// pixels on the way out: nearest neighbor going up so the image stays
+// crisp instead of inventing blurry detail, smoothing going down.
 function copyAndClose() {
   if (!image) return;
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const s = exportScale();
+  let src = ctx;
+  let w = canvas.width;
+  let h = canvas.height;
+  if (s !== 1) {
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(w * s));
+    out.height = Math.max(1, Math.round(h * s));
+    const oc = out.getContext("2d");
+    oc.imageSmoothingEnabled = s < 1;
+    oc.imageSmoothingQuality = "high";
+    oc.drawImage(canvas, 0, 0, out.width, out.height);
+    src = oc;
+    w = out.width;
+    h = out.height;
+  }
+  const data = src.getImageData(0, 0, w, h).data;
   const payload = new Uint8Array(8 + data.length);
   const view = new DataView(payload.buffer);
-  view.setUint32(0, canvas.width, true);
-  view.setUint32(4, canvas.height, true);
+  view.setUint32(0, w, true);
+  view.setUint32(4, h, true);
   payload.set(data, 8);
   invoke("copy_annotated", payload).catch((e) => console.error("copy failed", e));
 }
@@ -451,12 +614,28 @@ document.getElementById("copyBtn").addEventListener("click", copyAndClose);
 
 document.addEventListener("keydown", (e) => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
-  if (mod && e.key.toLowerCase() === "c") {
+  if (e.key === " ") {
+    // preventDefault also keeps Space from clicking a focused button.
+    e.preventDefault();
+    if (!spaceHeld) {
+      spaceHeld = true;
+      stage.classList.add("pan-ready");
+    }
+  } else if (mod && e.key.toLowerCase() === "c") {
     e.preventDefault();
     copyAndClose();
   } else if (mod && e.key.toLowerCase() === "z") {
     e.preventDefault();
     undo();
+  } else if (mod && (e.key === "=" || e.key === "+")) {
+    e.preventDefault();
+    zoomBy(1.25);
+  } else if (mod && e.key === "-") {
+    e.preventDefault();
+    zoomBy(1 / 1.25);
+  } else if (mod && e.key === "0") {
+    e.preventDefault();
+    resetView();
   } else if (e.key === "Escape") {
     if (draft) {
       draft = null;

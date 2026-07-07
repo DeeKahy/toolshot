@@ -20,12 +20,20 @@
       <span id="gradients"></span>
       <span class="tool" id="undoBtn" title="Undo (Cmd+Z)">Undo</span>
       <span class="spacer"></span>
+      <span class="tool" id="zoomBtn" title="Click to fit">Fit</span>
+      <select id="exportScale" title="Size of the copied image">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+      </select>
       <button class="primary" id="copyBtn">Copy</button>
     </div>
     <div id="stage">
       <canvas id="shot"></canvas>
     </div>
-    <div id="status"><kbd id="modKey">Cmd</kbd>+<kbd>C</kbd> copy and close &nbsp;&middot;&nbsp; <kbd id="modKey2">Cmd</kbd>+<kbd>Z</kbd> undo &nbsp;&middot;&nbsp; <kbd>Esc</kbd> close</div>
+    <div id="status"><kbd class="modKey">Cmd</kbd>+<kbd>C</kbd> copy and close &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+<kbd>Z</kbd> undo &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+scroll zoom &nbsp;&middot;&nbsp; <kbd>Space</kbd>+drag pan &nbsp;&middot;&nbsp; <kbd>Esc</kbd> close</div>
   </div>
   <script src="js/editor.js"></script>
 </body>

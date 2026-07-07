@@ -32,3 +32,5 @@ This file keeps the history of what has landed.
 - [x] Memory: frozen screen frame and capture PNG are dropped as soon as the overlay / editor is done with them
 - [x] Frontend split into markup-only HTML plus per-page files under src/css/ and src/js/, shared css/base.css
 - [x] Memory: resident process split into a tiny tray/hotkey daemon (about 12MB) that spawns a per-session Tauri UI process, all capture and webview memory is returned on close
+- [x] Editor: view zoom and pan (Cmd+scroll or pinch to zoom, scroll / Space+drag / middle-drag to pan, Cmd+0 or click the readout to fit), display only, the copied pixels are untouched
+- [x] Editor: output size selector on copy (0.5x to 4x), nearest neighbor upscaling so small captures get bigger without going blurry
