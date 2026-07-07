@@ -9,16 +9,27 @@
 <body>
   <div id="app">
     <div id="toolbar">
-      <span class="tool" data-tool="rect">Rect</span>
-      <span class="tool" data-tool="arrow">Arrow</span>
-      <span class="tool" data-tool="blur">Blur</span>
-      <span class="tool" data-tool="crop">Crop</span>
-      <span class="tool placeholder" title="Coming soon">Draw</span>
-      <span class="tool placeholder" title="Coming soon">Text</span>
+      <span class="tool" data-tool="rect" title="Rectangle">Rect</span>
+      <span class="tool" data-tool="arrow" title="Arrow">Arrow</span>
+      <span class="tool" data-tool="pen" title="Freeform pen">Draw</span>
+      <span class="tool" data-tool="text" title="Text">Text</span>
+      <span class="tool" data-tool="badge" title="Numbered badge, drag to add a pointer">Badge</span>
+      <span class="tool" data-tool="blur" title="Pixelate a region">Blur</span>
+      <span class="tool" data-tool="blackout" title="Solid redaction bar">Blackout</span>
+      <span class="tool" data-tool="crop" title="Crop">Crop</span>
+      <span class="tool" data-tool="eyedropper" title="Pick a color from the screenshot">Pick</span>
       <input type="color" id="color" value="#ff3b30" title="Annotation color" />
+      <span id="colorPresets" title="Quick colors"></span>
+      <select id="thickness" title="Line thickness (scales with the capture size)">
+        <option value="0">Thin</option>
+        <option value="1" selected>Medium</option>
+        <option value="2">Thick</option>
+        <option value="3">Extra</option>
+      </select>
       <span class="tool" id="prettyBtn" title="Gradient background on copy">Pretty</span>
       <span id="gradients"></span>
       <span class="tool" id="undoBtn" title="Undo (Cmd+Z)">Undo</span>
+      <span class="tool" id="redoBtn" title="Redo (Cmd+Shift+Z)">Redo</span>
       <span class="spacer"></span>
       <span class="tool" id="zoomBtn" title="Click to fit">Fit</span>
       <select id="exportScale" title="Size of the copied image">
@@ -28,13 +39,14 @@
         <option value="3">3x</option>
         <option value="4">4x</option>
       </select>
+      <span class="tool" id="saveBtn" title="Save to file (Cmd+S)">Save</span>
       <button class="primary" id="copyBtn">Copy</button>
     </div>
     <div id="stage">
       <canvas id="shot"></canvas>
     </div>
-    <div id="status"><kbd class="modKey">Cmd</kbd>+<kbd>C</kbd> copy and close &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+<kbd>Z</kbd> undo &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+scroll zoom &nbsp;&middot;&nbsp; <kbd>Space</kbd>+drag pan &nbsp;&middot;&nbsp; <kbd>Esc</kbd> close</div>
+    <div id="status"><kbd class="modKey">Cmd</kbd>+<kbd>C</kbd> copy &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+<kbd>S</kbd> save &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+<kbd>Z</kbd> undo &nbsp;&middot;&nbsp; <kbd class="modKey">Cmd</kbd>+scroll zoom &nbsp;&middot;&nbsp; <kbd>Space</kbd>+drag pan &nbsp;&middot;&nbsp; <kbd>Esc</kbd> close</div>
   </div>
-  <script src="js/editor.js"></script>
+  <script type="module" src="js/editor.js"></script>
 </body>
 </html>

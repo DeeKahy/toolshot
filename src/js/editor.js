@@ -1,3 +1,7 @@
+import * as geo from "./geometry.js";
+import { History } from "./history.js";
+import { normalizeRect, arrowHead } from "./shapes.js";
+
 const invoke = window.__TAURI__.core.invoke;
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 if (!isMac) {
@@ -12,6 +16,9 @@ const prettyBtn = document.getElementById("prettyBtn");
 const gradientsEl = document.getElementById("gradients");
 const zoomBtn = document.getElementById("zoomBtn");
 const scaleSelect = document.getElementById("exportScale");
+const undoBtn = document.getElementById("undoBtn");
+const redoBtn = document.getElementById("redoBtn");
+const thicknessSelect = document.getElementById("thickness");
 
 const GRADIENTS = [
   { name: "Auto (from screenshot)", auto: true },
@@ -23,13 +30,49 @@ const GRADIENTS = [
   { name: "Graphite", from: "#485563", to: "#29323c" },
 ];
 
+// Shapes that redact image content: they render below annotations and,
+// in pretty mode, inside the rounded clip.
+const REDACTION = new Set(["blur", "blackout"]);
+// Tools that act on a single click rather than a drag.
+const CLICK_TOOLS = new Set(["text", "badge", "eyedropper"]);
+
 let image = null;         // the captured screenshot
-let tool = null;          // "rect" | "arrow" | "blur" | "crop" | null
-let shapes = [];          // committed annotations, in full-image coordinates
+let sampleCtx = null;     // offscreen copy of the raw image, for the eyedropper
+let tool = null;          // active tool id, or null
+const shapes = [];        // committed annotations, in full-image coordinates
 let draft = null;         // shape being dragged right now
 let crop = null;          // {x, y, w, h} visible region, null = full image
-let history = [];         // undo entries: {kind:"shape"} | {kind:"crop", prev}
-let lineWidth = 6;        // in image pixels, set from image size on load
+let lineWidth = 6;        // current stroke width in image pixels, see updateLineWidth
+const history = new History();
+
+// Line thickness is a multiplier on a size-proportional base stroke, so
+// the same setting looks proportionally identical on a small and a large
+// capture (a big screenshot gets thicker lines, not hairlines). Each
+// shape snapshots the resolved width when created, so changing this only
+// affects new annotations, never ones already drawn.
+const THICKNESS = [
+  { name: "Thin", mult: 2 },
+  { name: "Medium", mult: 3.5 },
+  { name: "Thick", mult: 5.5 },
+  { name: "Extra", mult: 8.5 },
+];
+let thicknessIndex = parseInt(localStorage.getItem("thickness") || "1", 10);
+if (!(thicknessIndex >= 0 && thicknessIndex < THICKNESS.length)) thicknessIndex = 1;
+
+function updateLineWidth() {
+  if (!image) return;
+  const base = geo.strokeWidth(image.naturalWidth); // proportional to capture size
+  lineWidth = Math.max(2, Math.round(base * THICKNESS[thicknessIndex].mult));
+}
+
+// Text and badges scale off the same current stroke width so thickness
+// drives every tool.
+function textSizeFor(width) {
+  return Math.max(16, Math.round(width * 4));
+}
+function badgeRadiusFor(width) {
+  return Math.max(width * 2.4, 14);
+}
 const scratch = document.createElement("canvas"); // downscale buffer for blur
 
 // Pretty mode settings survive across captures, the editor window is
@@ -38,32 +81,97 @@ let pretty = localStorage.getItem("prettyOn") === "1";
 let gradientIndex = parseInt(localStorage.getItem("prettyGradient") || "0", 10);
 if (!(gradientIndex >= 0 && gradientIndex < GRADIENTS.length)) gradientIndex = 0;
 
+// Quick-pick palette. Red leads and is the default annotation color; the
+// rest are high-contrast staples so most captures need no trip to the OS
+// color picker.
+const PRESET_COLORS = [
+  "#ff3b30", // red
+  "#ff9500", // orange
+  "#ffcc00", // yellow
+  "#34c759", // green
+  "#007aff", // blue
+  "#af52de", // purple
+  "#000000", // black
+  "#ffffff", // white
+];
+const presetsEl = document.getElementById("colorPresets");
+
 const savedColor = localStorage.getItem("annotationColor");
 if (/^#[0-9a-f]{6}$/i.test(savedColor || "")) colorInput.value = savedColor;
+
+function syncColorUi() {
+  const cur = colorInput.value.toLowerCase();
+  for (const el of presetsEl.children) {
+    el.classList.toggle("active", el.dataset.color === cur);
+  }
+}
+
+function setColor(c) {
+  colorInput.value = c;
+  localStorage.setItem("annotationColor", c);
+  syncColorUi();
+}
+
+for (const c of PRESET_COLORS) {
+  const b = document.createElement("span");
+  b.className = "color-preset";
+  b.dataset.color = c.toLowerCase();
+  b.style.background = c;
+  b.title = c;
+  b.addEventListener("click", () => setColor(c));
+  presetsEl.appendChild(b);
+}
+
+colorInput.addEventListener("input", syncColorUi);
 colorInput.addEventListener("change", () => {
   localStorage.setItem("annotationColor", colorInput.value);
+  syncColorUi();
+});
+syncColorUi();
+
+thicknessSelect.value = String(thicknessIndex);
+thicknessSelect.addEventListener("change", () => {
+  thicknessIndex = parseInt(thicknessSelect.value, 10) || 0;
+  localStorage.setItem("thickness", String(thicknessIndex));
+  updateLineWidth();
 });
 
 // Shapes keep full-image coordinates even after cropping, the canvas is
 // just translated by the crop origin when drawing.
 function viewRect() {
-  return crop || { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight };
+  return geo.viewRect(crop, image.naturalWidth, image.naturalHeight);
 }
 
+// The capture PNG now arrives as raw bytes over binary IPC (no base64),
+// so a fullscreen retina shot opens without the JSON detour.
 invoke("get_capture_png")
-  .then((b64) => {
+  .then((buf) => {
+    const blob = new Blob([new Uint8Array(buf)], { type: "image/png" });
+    const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
       image = img;
-      // Retina captures are 2x, keep strokes visually consistent.
-      lineWidth = Math.max(4, Math.round(img.naturalWidth / 320));
+      updateLineWidth();
+      buildSampleCanvas();
       computeAutoColors();
       setCanvasSize();
       redraw();
+      URL.revokeObjectURL(url);
     };
-    img.src = "data:image/png;base64," + b64;
+    img.src = url;
   })
   .catch((e) => console.error("failed to load capture", e));
+
+// A clean copy of the raw screenshot, so the eyedropper reads original
+// pixels regardless of annotations or pretty framing on the main canvas.
+function buildSampleCanvas() {
+  const s = document.createElement("canvas");
+  s.width = image.naturalWidth;
+  s.height = image.naturalHeight;
+  const c = s.getContext("2d", { willReadFrequently: true });
+  c.drawImage(image, 0, 0);
+  sampleCtx = c;
+}
 
 // The auto gradient, resolved from the capture once it loads. The fallback
 // only shows in the instant before the image arrives.
@@ -144,20 +252,9 @@ function computeAutoColors() {
 }
 
 // Pretty mode geometry, in image pixels, relative to the visible view.
-function prettyPad() {
-  const v = viewRect();
-  return Math.max(48, Math.round(Math.max(v.w, v.h) / 10));
-}
-
-function prettyRadius() {
-  return Math.max(8, Math.round(viewRect().w / 90));
-}
-
-// Gradient padding around the screenshot when pretty mode is on. It is
-// part of the canvas bitmap itself, so the preview and the copied image
-// are the same pixels by construction.
 function margin() {
-  return pretty ? prettyPad() : 0;
+  const v = viewRect();
+  return geo.margin(pretty, v.w, v.h);
 }
 
 // View zoom and pan are display-only: they change the canvas CSS size and
@@ -175,7 +272,7 @@ function layout() {
   if (!image) return;
   const availW = stage.clientWidth - 32;
   const availH = stage.clientHeight - 32;
-  fitScale = Math.min(availW / canvas.width, availH / canvas.height, 1);
+  fitScale = geo.fitScale(canvas.width, canvas.height, availW, availH);
   applyView();
 }
 window.addEventListener("resize", layout);
@@ -183,12 +280,8 @@ window.addEventListener("resize", layout);
 function applyView() {
   const w = Math.max(1, canvas.width * fitScale * viewZoom);
   const h = Math.max(1, canvas.height * fitScale * viewZoom);
-  // Keep the canvas from being panned fully out of the stage: once an
-  // edge reaches the matching stage edge, stop.
-  const maxX = Math.max(0, (w - stage.clientWidth) / 2);
-  const maxY = Math.max(0, (h - stage.clientHeight) / 2);
-  panX = Math.min(maxX, Math.max(-maxX, panX));
-  panY = Math.min(maxY, Math.max(-maxY, panY));
+  panX = geo.clampPan(panX, w, stage.clientWidth);
+  panY = geo.clampPan(panY, h, stage.clientHeight);
   canvas.style.width = w + "px";
   canvas.style.height = h + "px";
   canvas.style.transform = "translate(" + panX + "px, " + panY + "px)";
@@ -225,8 +318,8 @@ function zoomAt(factor, cx, cy) {
     const sr = stage.getBoundingClientRect();
     const w = canvas.width * fitScale * viewZoom;
     const h = canvas.height * fitScale * viewZoom;
-    panX = cx - (sr.left + sr.width / 2) - (fx - 0.5) * w;
-    panY = cy - (sr.top + sr.height / 2) - (fy - 0.5) * h;
+    panX = geo.panToKeepCursor(cx, sr.left + sr.width / 2, fx, w);
+    panY = geo.panToKeepCursor(cy, sr.top + sr.height / 2, fy, h);
   }
   applyView();
 }
@@ -315,75 +408,145 @@ syncPrettyUi();
 
 function drawShape(s) {
   const g = ctx;
+  const w = s.width || lineWidth;
   g.strokeStyle = s.color;
   g.fillStyle = s.color;
-  g.lineWidth = lineWidth;
+  g.lineWidth = w;
   g.lineJoin = "round";
   g.lineCap = "round";
   if (s.kind === "rect") {
-    g.strokeRect(
-      Math.min(s.x0, s.x1),
-      Math.min(s.y0, s.y1),
-      Math.abs(s.x1 - s.x0),
-      Math.abs(s.y1 - s.y0)
-    );
+    const r = normalizeRect(s);
+    g.strokeRect(r.x, r.y, r.w, r.h);
   } else if (s.kind === "arrow") {
-    const angle = Math.atan2(s.y1 - s.y0, s.x1 - s.x0);
-    const head = Math.max(lineWidth * 3.5, 14);
-    // Stop the shaft short so it does not poke past the head.
-    const endX = s.x1 - head * 0.6 * Math.cos(angle);
-    const endY = s.y1 - head * 0.6 * Math.sin(angle);
+    const head = Math.max(w * 3.5, 14);
+    const a = arrowHead(s.x0, s.y0, s.x1, s.y1, head);
     g.beginPath();
     g.moveTo(s.x0, s.y0);
-    g.lineTo(endX, endY);
+    g.lineTo(a.shaftEnd.x, a.shaftEnd.y);
     g.stroke();
     g.beginPath();
-    g.moveTo(s.x1, s.y1);
-    g.lineTo(s.x1 - head * Math.cos(angle - 0.45), s.y1 - head * Math.sin(angle - 0.45));
-    g.lineTo(s.x1 - head * Math.cos(angle + 0.45), s.y1 - head * Math.sin(angle + 0.45));
+    g.moveTo(a.tip.x, a.tip.y);
+    g.lineTo(a.left.x, a.left.y);
+    g.lineTo(a.right.x, a.right.y);
     g.closePath();
     g.fill();
-  } else if (s.kind === "blur") {
-    const x = Math.min(s.x0, s.x1);
-    const y = Math.min(s.y0, s.y1);
-    const w = Math.abs(s.x1 - s.x0);
-    const h = Math.abs(s.y1 - s.y0);
-    if (w < 2 || h < 2) return;
-    // Mosaic: shrink the region, then scale it back up with smoothing
-    // off. Blurs render below annotations, so they only ever see image
-    // content and other blurs.
-    const block = Math.max(6, Math.round(image.naturalWidth / 120));
-    const sw = Math.max(1, Math.round(w / block));
-    const sh = Math.max(1, Math.round(h / block));
-    scratch.width = sw;
-    scratch.height = sh;
-    const v = viewRect();
-    const m = margin();
-    // Source coordinates are raw canvas pixels, unaffected by the crop
-    // translation, so shift by the crop origin and pretty padding here.
-    scratch.getContext("2d").drawImage(canvas, x - v.x + m, y - v.y + m, w, h, 0, 0, sw, sh);
-    g.imageSmoothingEnabled = false;
-    g.drawImage(scratch, 0, 0, sw, sh, x, y, w, h);
-    g.imageSmoothingEnabled = true;
-  } else if (s.kind === "crop") {
-    // Selection preview only: dim everything outside the dragged rect.
-    const v = viewRect();
-    const x = Math.min(s.x0, s.x1);
-    const y = Math.min(s.y0, s.y1);
-    const w = Math.abs(s.x1 - s.x0);
-    const h = Math.abs(s.y1 - s.y0);
-    g.save();
-    g.fillStyle = "rgba(0, 0, 0, 0.5)";
+  } else if (s.kind === "pen") {
+    if (s.points.length < 2) return;
     g.beginPath();
-    g.rect(v.x, v.y, v.w, v.h);
-    g.rect(x, y, w, h);
-    g.fill("evenodd");
-    g.strokeStyle = "#fff";
-    g.lineWidth = Math.max(2, lineWidth / 2);
-    g.setLineDash([lineWidth, lineWidth]);
-    g.strokeRect(x, y, w, h);
-    g.restore();
+    g.moveTo(s.points[0].x, s.points[0].y);
+    for (let i = 1; i < s.points.length; i++) g.lineTo(s.points[i].x, s.points[i].y);
+    g.stroke();
+  } else if (s.kind === "text") {
+    drawText(s);
+  } else if (s.kind === "badge") {
+    drawBadge(s);
+  } else if (s.kind === "blur") {
+    drawBlur(s);
+  } else if (s.kind === "blackout") {
+    const r = normalizeRect(s);
+    if (r.w < 2 || r.h < 2) return;
+    g.fillStyle = "#000";
+    g.fillRect(r.x, r.y, r.w, r.h);
+  } else if (s.kind === "crop") {
+    drawCropPreview(s);
   }
+}
+
+// A contrasting outline color: white for most fills so text pops on dark
+// backgrounds, flipping to near-black when the text itself is very light
+// so a white letter on a white wall does not vanish.
+function outlineColor(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+  if (!m) return "rgba(255, 255, 255, 0.95)";
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.7 ? "rgba(0, 0, 0, 0.9)" : "rgba(255, 255, 255, 0.95)";
+}
+
+function drawText(s) {
+  const g = ctx;
+  g.textBaseline = "top";
+  g.font = s.size + "px -apple-system, Segoe UI, sans-serif";
+  g.lineJoin = "round";
+  g.strokeStyle = outlineColor(s.color);
+  g.lineWidth = Math.max(2, s.size * 0.16);
+  g.fillStyle = s.color;
+  const lines = s.text.split("\n");
+  const lineHeight = s.size * 1.25;
+  lines.forEach((line, i) => {
+    const y = s.y + i * lineHeight;
+    // Stroke first, fill on top, so the halo sits behind the letters.
+    g.strokeText(line, s.x, y);
+    g.fillText(line, s.x, y);
+  });
+}
+
+function drawBadge(s) {
+  const g = ctx;
+  const r = s.radius || badgeRadiusFor(s.width || lineWidth);
+
+  // Speech-bubble tail: a triangle from two points on the circle to the
+  // target, drawn first so the circle on top hides its base and only the
+  // pointing part sticks out.
+  if (s.tail) {
+    const dir = Math.atan2(s.tail.y - s.y, s.tail.x - s.x);
+    const perp = dir + Math.PI / 2;
+    const baseHalf = r * 0.6;
+    g.beginPath();
+    g.fillStyle = s.color;
+    g.moveTo(s.x + Math.cos(perp) * baseHalf, s.y + Math.sin(perp) * baseHalf);
+    g.lineTo(s.x - Math.cos(perp) * baseHalf, s.y - Math.sin(perp) * baseHalf);
+    g.lineTo(s.tail.x, s.tail.y);
+    g.closePath();
+    g.fill();
+  }
+
+  g.beginPath();
+  g.fillStyle = s.color;
+  g.arc(s.x, s.y, r, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#fff";
+  g.textBaseline = "middle";
+  g.textAlign = "center";
+  g.font = "bold " + Math.round(r * 1.15) + "px -apple-system, Segoe UI, sans-serif";
+  g.fillText(String(s.n), s.x, s.y + r * 0.05);
+  g.textAlign = "left";
+}
+
+function drawBlur(s) {
+  const r = normalizeRect(s);
+  if (r.w < 2 || r.h < 2) return;
+  // Mosaic: shrink the region, then scale it back up with smoothing off.
+  const block = Math.max(6, Math.round(image.naturalWidth / 120));
+  const sw = Math.max(1, Math.round(r.w / block));
+  const sh = Math.max(1, Math.round(r.h / block));
+  scratch.width = sw;
+  scratch.height = sh;
+  const v = viewRect();
+  const m = margin();
+  // Source coordinates are raw canvas pixels, unaffected by the crop
+  // translation, so shift by the crop origin and pretty padding here.
+  scratch.getContext("2d").drawImage(canvas, r.x - v.x + m, r.y - v.y + m, r.w, r.h, 0, 0, sw, sh);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(scratch, 0, 0, sw, sh, r.x, r.y, r.w, r.h);
+  ctx.imageSmoothingEnabled = true;
+}
+
+function drawCropPreview(s) {
+  const g = ctx;
+  const v = viewRect();
+  const r = normalizeRect(s);
+  g.save();
+  g.fillStyle = "rgba(0, 0, 0, 0.5)";
+  g.beginPath();
+  g.rect(v.x, v.y, v.w, v.h);
+  g.rect(r.x, r.y, r.w, r.h);
+  g.fill("evenodd");
+  g.strokeStyle = "#fff";
+  g.lineWidth = Math.max(2, lineWidth / 2);
+  g.setLineDash([lineWidth, lineWidth]);
+  g.strokeRect(r.x, r.y, r.w, r.h);
+  g.restore();
 }
 
 function setCanvasSize() {
@@ -422,30 +585,30 @@ function redraw() {
     ctx.shadowBlur = m * 0.45;
     ctx.shadowOffsetY = m * 0.18;
     ctx.fillStyle = "#000";
-    roundedRect(ctx, m, m, v.w, v.h, prettyRadius());
+    roundedRect(ctx, m, m, v.w, v.h, geo.prettyRadius(v.w));
     ctx.fill();
     ctx.restore();
   }
 
-  // The screenshot with blurs baked in (they redact image content) gets
-  // the rounded clip in pretty mode. Annotations render afterwards,
-  // above the border, so a corner can never slice an arrow and edge
-  // marks overhang onto the gradient.
+  // The screenshot with redactions baked in (blur, blackout) gets the
+  // rounded clip in pretty mode. Annotations render afterwards, above the
+  // border, so a corner can never slice an arrow and edge marks overhang
+  // onto the gradient.
   ctx.save();
   if (pretty) {
-    roundedRect(ctx, m, m, v.w, v.h, prettyRadius());
+    roundedRect(ctx, m, m, v.w, v.h, geo.prettyRadius(v.w));
     ctx.clip();
   }
   ctx.translate(m - v.x, m - v.y);
   ctx.drawImage(image, 0, 0);
-  for (const s of shapes) if (s.kind === "blur") drawShape(s);
-  if (draft && draft.kind === "blur") drawShape(draft);
+  for (const s of shapes) if (REDACTION.has(s.kind)) drawShape(s);
+  if (draft && REDACTION.has(draft.kind)) drawShape(draft);
   ctx.restore();
 
   ctx.save();
   ctx.translate(m - v.x, m - v.y);
-  for (const s of shapes) if (s.kind !== "blur") drawShape(s);
-  if (draft && draft.kind !== "blur") drawShape(draft);
+  for (const s of shapes) if (!REDACTION.has(s.kind)) drawShape(s);
+  if (draft && !REDACTION.has(draft.kind)) drawShape(draft);
   ctx.restore();
 }
 
@@ -454,11 +617,7 @@ function redraw() {
 function canvasPos(e) {
   const r = canvas.getBoundingClientRect();
   const v = viewRect();
-  const m = margin();
-  return {
-    x: (e.clientX - r.left) * (canvas.width / r.width) - m + v.x,
-    y: (e.clientY - r.top) * (canvas.height / r.height) - m + v.y,
-  };
+  return geo.canvasToImage(e.clientX, e.clientY, r, canvas.width, canvas.height, margin(), v.x, v.y);
 }
 
 function setTool(next) {
@@ -482,10 +641,187 @@ prettyBtn.addEventListener("click", () => {
   syncPrettyUi();
 });
 
+// --- History-backed edits --------------------------------------------
+
+function syncHistoryButtons() {
+  undoBtn.classList.toggle("disabled", !history.canUndo());
+  redoBtn.classList.toggle("disabled", !history.canRedo());
+}
+syncHistoryButtons();
+
+function addShape(shape) {
+  history.commit(
+    () => shapes.push(shape),
+    () => {
+      const i = shapes.indexOf(shape);
+      if (i >= 0) shapes.splice(i, 1);
+    }
+  );
+  syncHistoryButtons();
+  redraw();
+}
+
+function commitCrop(next) {
+  const prev = crop;
+  history.commit(
+    () => {
+      crop = next;
+      setCanvasSize();
+    },
+    () => {
+      crop = prev;
+      setCanvasSize();
+    }
+  );
+  syncHistoryButtons();
+  redraw();
+}
+
+function undo() {
+  if (history.undo()) {
+    syncHistoryButtons();
+    redraw();
+  }
+}
+
+function redo() {
+  if (history.redo()) {
+    syncHistoryButtons();
+    redraw();
+  }
+}
+
+undoBtn.addEventListener("click", undo);
+redoBtn.addEventListener("click", redo);
+
+// --- Click tools: text, badge, eyedropper ----------------------------
+
+function nextBadge() {
+  let n = 0;
+  for (const s of shapes) if (s.kind === "badge" && s.n > n) n = s.n;
+  return n + 1;
+}
+
+function eyedrop(p) {
+  if (!sampleCtx) return;
+  const x = Math.round(p.x);
+  const y = Math.round(p.y);
+  if (x < 0 || y < 0 || x >= image.naturalWidth || y >= image.naturalHeight) return;
+  const d = sampleCtx.getImageData(x, y, 1, 1).data;
+  const hex = "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  colorInput.value = hex;
+  localStorage.setItem("annotationColor", hex);
+  setTool(null); // one-shot, like most eyedroppers
+}
+
+// Inline text editing: a textarea floats over the click point while you
+// type, then bakes into a text shape on commit. Positioned in client
+// space and scaled to match the canvas so it looks like the final pixels.
+let textEditor = null;
+
+function startText(clientX, clientY, p) {
+  commitText(); // bank any text already being typed before opening a new box
+  const size = textSizeFor(lineWidth); // image-space px
+  const displayScale = fitScale * viewZoom;
+
+  const ta = document.createElement("textarea");
+  ta.className = "text-editor";
+  ta.rows = 1;
+  ta.style.left = clientX + "px";
+  ta.style.top = clientY + "px";
+  ta.style.color = colorInput.value;
+  ta.style.font = size * displayScale + "px -apple-system, Segoe UI, sans-serif";
+  ta.style.lineHeight = size * displayScale * 1.25 + "px";
+  // Preview the same contrasting halo the committed text will get.
+  const halo = outlineColor(colorInput.value);
+  ta.style.textShadow =
+    `-1px -1px 0 ${halo}, 1px -1px 0 ${halo}, -1px 1px 0 ${halo}, 1px 1px 0 ${halo}`;
+  document.body.appendChild(ta);
+
+  // `ready` guards the blur handler: focusing inside a mousedown can be
+  // undone by the browser's own focus handling, and that spurious blur
+  // would otherwise commit an empty box and close the editor instantly.
+  textEditor = { el: ta, x: p.x, y: p.y, size, color: colorInput.value, ready: false };
+
+  ta.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // keep editor shortcuts (and Space) from firing while typing
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      commitText();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelText();
+    }
+  });
+  // Grow the box to fit as you type so long lines stay visible.
+  ta.addEventListener("input", () => {
+    ta.style.width = "auto";
+    ta.style.height = "auto";
+    ta.style.width = ta.scrollWidth + 4 + "px";
+    ta.style.height = ta.scrollHeight + "px";
+  });
+  ta.addEventListener("blur", () => {
+    if (textEditor && textEditor.ready) commitText();
+  });
+
+  // Focus after the triggering mouse event settles, then arm the blur
+  // commit. Without the delay the focus does not stick.
+  setTimeout(() => {
+    ta.focus();
+    if (textEditor && textEditor.el === ta) textEditor.ready = true;
+  }, 0);
+}
+
+function commitText() {
+  if (!textEditor) return;
+  const { el, x, y, size, color } = textEditor;
+  const text = el.value.replace(/\s+$/, "");
+  textEditor = null; // clear first so the blur handler does not re-enter
+  el.remove();
+  if (text) addShape({ kind: "text", color, x, y, size, text, width: lineWidth });
+}
+
+function cancelText() {
+  if (!textEditor) return;
+  const el = textEditor.el;
+  textEditor = null;
+  el.remove();
+}
+
+// --- Pointer handling ------------------------------------------------
+
 canvas.addEventListener("mousedown", (e) => {
   if (!tool || !image || e.button !== 0 || spaceHeld || panDrag) return;
   const p = canvasPos(e);
-  draft = { kind: tool, color: colorInput.value, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+  if (tool === "eyedropper") {
+    eyedrop(p);
+    return;
+  }
+  if (tool === "badge") {
+    // Press places the circle; dragging out pulls a speech-bubble tail
+    // toward the release point. A plain click stays a tailless badge.
+    draft = {
+      kind: "badge",
+      color: colorInput.value,
+      x: p.x,
+      y: p.y,
+      n: nextBadge(),
+      width: lineWidth,
+      tail: null,
+    };
+    return;
+  }
+  if (tool === "text") {
+    // Stop the browser from stealing focus back off the editor we open.
+    e.preventDefault();
+    startText(e.clientX, e.clientY, p);
+    return;
+  }
+  if (tool === "pen") {
+    draft = { kind: "pen", color: colorInput.value, points: [{ x: p.x, y: p.y }], width: lineWidth };
+    return;
+  }
+  draft = { kind: tool, color: colorInput.value, x0: p.x, y0: p.y, x1: p.x, y1: p.y, width: lineWidth };
 });
 
 window.addEventListener("mousemove", (e) => {
@@ -498,8 +834,18 @@ window.addEventListener("mousemove", (e) => {
   }
   if (!draft) return;
   const p = canvasPos(e);
-  draft.x1 = p.x;
-  draft.y1 = p.y;
+  if (draft.kind === "pen") {
+    draft.points.push({ x: p.x, y: p.y });
+  } else if (draft.kind === "badge") {
+    // Only grow a tail once the drag clears the circle, so a small
+    // wobble on a click does not sprout one.
+    const r = badgeRadiusFor(draft.width);
+    const far = Math.hypot(p.x - draft.x, p.y - draft.y) > r * 1.1;
+    draft.tail = far ? { x: p.x, y: p.y } : null;
+  } else {
+    draft.x1 = p.x;
+    draft.y1 = p.y;
+  }
   redraw();
 });
 
@@ -513,9 +859,7 @@ function applyCrop(d) {
   const w = Math.round(x1 - x0);
   const h = Math.round(y1 - y0);
   if (w < 10 || h < 10) return;
-  history.push({ kind: "crop", prev: crop });
-  crop = { x: Math.round(x0), y: Math.round(y0), w, h };
-  setCanvasSize();
+  commitCrop({ x: Math.round(x0), y: Math.round(y0), w, h });
   setTool(null);
 }
 
@@ -526,29 +870,33 @@ window.addEventListener("mouseup", () => {
     return;
   }
   if (!draft) return;
+  if (draft.kind === "pen") {
+    const d = draft;
+    draft = null;
+    if (d.points.length > 1) addShape(d);
+    else redraw();
+    return;
+  }
+  if (draft.kind === "badge") {
+    // A badge is valid with or without a drag, so always commit it.
+    const d = draft;
+    draft = null;
+    addShape(d);
+    return;
+  }
   const tiny = Math.abs(draft.x1 - draft.x0) < 3 && Math.abs(draft.y1 - draft.y0) < 3;
   if (draft.kind === "crop") {
-    if (!tiny) applyCrop(draft);
-  } else if (!tiny) {
-    shapes.push(draft);
-    history.push({ kind: "shape" });
+    const d = draft;
+    draft = null;
+    if (!tiny) applyCrop(d);
+    else redraw();
+    return;
   }
+  const d = draft;
   draft = null;
-  redraw();
+  if (!tiny) addShape(d);
+  else redraw();
 });
-
-function undo() {
-  const entry = history.pop();
-  if (!entry) return;
-  if (entry.kind === "shape") {
-    shapes.pop();
-  } else if (entry.kind === "crop") {
-    crop = entry.prev;
-    setCanvasSize();
-  }
-  redraw();
-}
-document.getElementById("undoBtn").addEventListener("click", undo);
 
 function roundedRect(c, x, y, w, h, r) {
   c.beginPath();
@@ -563,12 +911,7 @@ function roundedRect(c, x, y, w, h, r) {
 // Output scale, applied only at copy time so the working canvas stays 1:1
 // with the capture. Never persisted, it is a per-shot decision.
 function exportScale() {
-  let s = parseFloat(scaleSelect.value);
-  if (!(s > 0)) s = 1;
-  // Stay inside canvas size limits, a 4x retina fullscreen would blow past
-  // the roughly 16k per-side ceiling and drawImage would silently no-op.
-  const limit = 16000 / Math.max(canvas.width, canvas.height);
-  return Math.min(s, Math.max(1, limit));
+  return geo.clampExportScale(parseFloat(scaleSelect.value), canvas.width, canvas.height);
 }
 
 function updateScaleTitle() {
@@ -580,37 +923,50 @@ function updateScaleTitle() {
 }
 scaleSelect.addEventListener("change", updateScaleTitle);
 
-// What you see is what gets copied: the working canvas already contains
-// the pretty framing when it is on. A non-1x scale resizes those exact
-// pixels on the way out: nearest neighbor going up so the image stays
-// crisp instead of inventing blurry detail, smoothing going down.
+// The exported pixels: the working canvas, scaled if the user chose a
+// non-1x output. Nearest neighbor going up so a small capture stays
+// crisp, smoothing going down. Returns {data, w, h}.
+function exportPixels() {
+  const s = exportScale();
+  if (s === 1) {
+    return { data: ctx.getImageData(0, 0, canvas.width, canvas.height).data, w: canvas.width, h: canvas.height };
+  }
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(canvas.width * s));
+  out.height = Math.max(1, Math.round(canvas.height * s));
+  const oc = out.getContext("2d");
+  oc.imageSmoothingEnabled = s < 1;
+  oc.imageSmoothingQuality = "high";
+  oc.drawImage(canvas, 0, 0, out.width, out.height);
+  return { data: oc.getImageData(0, 0, out.width, out.height).data, w: out.width, h: out.height };
+}
+
+// Pack width/height header + RGBA bytes into one payload for the raw IPC.
+function packPixels(px) {
+  const payload = new Uint8Array(8 + px.data.length);
+  const view = new DataView(payload.buffer);
+  view.setUint32(0, px.w, true);
+  view.setUint32(4, px.h, true);
+  payload.set(px.data, 8);
+  return payload;
+}
+
 function copyAndClose() {
   if (!image) return;
-  const s = exportScale();
-  let src = ctx;
-  let w = canvas.width;
-  let h = canvas.height;
-  if (s !== 1) {
-    const out = document.createElement("canvas");
-    out.width = Math.max(1, Math.round(w * s));
-    out.height = Math.max(1, Math.round(h * s));
-    const oc = out.getContext("2d");
-    oc.imageSmoothingEnabled = s < 1;
-    oc.imageSmoothingQuality = "high";
-    oc.drawImage(canvas, 0, 0, out.width, out.height);
-    src = oc;
-    w = out.width;
-    h = out.height;
-  }
-  const data = src.getImageData(0, 0, w, h).data;
-  const payload = new Uint8Array(8 + data.length);
-  const view = new DataView(payload.buffer);
-  view.setUint32(0, w, true);
-  view.setUint32(4, h, true);
-  payload.set(data, 8);
-  invoke("copy_annotated", payload).catch((e) => console.error("copy failed", e));
+  commitText();
+  invoke("copy_annotated", packPixels(exportPixels())).catch((e) => console.error("copy failed", e));
 }
 document.getElementById("copyBtn").addEventListener("click", copyAndClose);
+
+function saveToFile() {
+  if (!image) return;
+  commitText();
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  invoke("save_annotated", packPixels(exportPixels()), {
+    headers: { "x-filename": "toolshot-" + stamp + ".png" },
+  }).catch((e) => console.error("save failed", e));
+}
+document.getElementById("saveBtn").addEventListener("click", saveToFile);
 
 document.addEventListener("keydown", (e) => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -624,6 +980,15 @@ document.addEventListener("keydown", (e) => {
   } else if (mod && e.key.toLowerCase() === "c") {
     e.preventDefault();
     copyAndClose();
+  } else if (mod && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    saveToFile();
+  } else if (mod && e.shiftKey && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    redo();
+  } else if (mod && e.key.toLowerCase() === "y") {
+    e.preventDefault();
+    redo();
   } else if (mod && e.key.toLowerCase() === "z") {
     e.preventDefault();
     undo();
@@ -637,9 +1002,13 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     resetView();
   } else if (e.key === "Escape") {
-    if (draft) {
+    if (textEditor) {
+      cancelText();
+    } else if (draft) {
       draft = null;
       redraw();
+    } else if (tool) {
+      setTool(null);
     } else {
       invoke("close_editor");
     }
