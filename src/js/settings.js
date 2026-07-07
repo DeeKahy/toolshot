@@ -80,7 +80,15 @@ updateBtn.addEventListener("click", async () => {
   }
 });
 
+const logBtn = document.getElementById("logBtn");
+logBtn.addEventListener("click", () => {
+  invoke("open_log").catch((e) => {
+    status.textContent = "Could not open log: " + String(e);
+  });
+});
+
 for (const el of document.querySelectorAll(".bind")) {
+  if (el.id === "updateBtn" || el.id === "logBtn") continue;
   el.addEventListener("click", () => {
     if (recording) render(recording, currentAccel(recording));
     recording = el;

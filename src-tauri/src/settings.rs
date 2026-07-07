@@ -172,3 +172,27 @@ pub fn open_url(url: String) -> Result<(), String> {
 
     result.map(|_| ()).map_err(|e| e.to_string())
 }
+
+// Opens the stderr log both processes write to, in whatever the system
+// uses for text files.
+#[tauri::command]
+pub fn open_log() -> Result<(), String> {
+    let path = crate::logging::log_path().ok_or_else(|| "no config directory".to_string())?;
+    if !path.exists() {
+        return Err("no log file yet".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&path).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&path).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("start")
+        .arg("")
+        .arg(&path)
+        .spawn();
+
+    result.map(|_| ()).map_err(|e| e.to_string())
+}

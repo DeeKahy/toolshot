@@ -7,6 +7,8 @@
 // when dismissed, so this process is all that stays in memory. Keep it
 // free of UI, capture and image dependencies.
 
+mod logging;
+
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use std::path::PathBuf;
@@ -62,6 +64,10 @@ fn main() {
             return;
         }
     };
+
+    // After the lock: a second instance must not truncate the log the
+    // running daemon is writing to.
+    logging::init("toolshot daemon", true);
 
     let mut builder = EventLoop::<UserEvent>::with_user_event();
     #[cfg(target_os = "macos")]
@@ -401,6 +407,41 @@ fn parse_accel(accel: &str) -> Result<HotKey, String> {
 
     let code = Code::from_str(code_str).map_err(|_| format!("unknown key: {code_str}"))?;
     Ok(HotKey::new(Some(mods), code))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_accel;
+    use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+
+    #[test]
+    fn parses_modifiers_and_key() {
+        let hk = parse_accel("Cmd+Shift+KeyC").unwrap();
+        assert_eq!(hk, HotKey::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyC));
+    }
+
+    #[test]
+    fn parses_every_modifier_name() {
+        let hk = parse_accel("Cmd+Ctrl+Alt+Shift+F12").unwrap();
+        let all = Modifiers::META | Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT;
+        assert_eq!(hk, HotKey::new(Some(all), Code::F12));
+    }
+
+    #[test]
+    fn rejects_missing_modifier() {
+        assert!(parse_accel("KeyC").is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_modifier_and_key() {
+        assert!(parse_accel("Hyper+KeyC").is_err());
+        assert!(parse_accel("Cmd+NotAKey").is_err());
+    }
+
+    #[test]
+    fn rejects_empty_accelerator() {
+        assert!(parse_accel("").is_err());
+    }
 }
 
 fn load_tray_icon() -> Option<tray_icon::Icon> {

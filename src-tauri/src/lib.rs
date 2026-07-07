@@ -4,19 +4,37 @@
 // back to the OS.
 
 mod capture;
+mod logging;
 mod picker;
 mod settings;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::Manager;
 
-// True while a command is between windows (overlay closed, editor not
+// Non-zero while a command is between windows (overlay closed, editor not
 // built yet) so the last-window-closed exit stays suppressed until the
 // next window exists.
-pub struct Busy(pub AtomicBool);
+pub struct Busy(pub AtomicUsize);
 
-pub fn set_busy(app: &tauri::AppHandle, busy: bool) {
-    app.state::<Busy>().0.store(busy, Ordering::SeqCst);
+// Holds the busy state for as long as it lives. Create it before closing
+// the old window and let it drop once the next window exists (or the
+// failure path unwinds), so no code path can forget to clear the flag
+// and leave an invisible process behind.
+pub struct BusyGuard {
+    app: tauri::AppHandle,
+}
+
+impl BusyGuard {
+    pub fn new(app: &tauri::AppHandle) -> Self {
+        app.state::<Busy>().0.fetch_add(1, Ordering::SeqCst);
+        BusyGuard { app: app.clone() }
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.app.state::<Busy>().0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 // The daemon sits next to this binary: in target/ during dev, in the
@@ -64,13 +82,16 @@ pub fn run() {
         return;
     }
 
+    logging::init(&format!("toolshot-ui {mode}"), false);
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(capture::CaptureState::default())
         .manage(capture::ScreenState::default())
         .manage(capture::OverlayMode::default())
         .manage(picker::PickerState::default())
-        .manage(Busy(AtomicBool::new(false)))
+        .manage(Busy(AtomicUsize::new(0)))
         .invoke_handler(tauri::generate_handler![
             capture::check_screen_permission,
             capture::list_windows,
@@ -83,6 +104,7 @@ pub fn run() {
             capture::cancel_overlay,
             capture::get_capture_png,
             capture::copy_annotated,
+            capture::save_annotated,
             capture::close_editor,
             picker::pick_color,
             picker::get_picked_color,
@@ -95,6 +117,7 @@ pub fn run() {
             settings::close_settings,
             settings::get_app_version,
             settings::open_url,
+            settings::open_log,
         ])
         .setup(move |app| {
             // No dock icon, matching the daemon.
@@ -123,7 +146,7 @@ pub fn run() {
         // Exit with the last window unless a command is mid transition
         // (overlay to editor, overlay to color popup).
         if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
-            if code.is_none() && app.state::<Busy>().0.load(Ordering::SeqCst) {
+            if code.is_none() && app.state::<Busy>().0.load(Ordering::SeqCst) > 0 {
                 api.prevent_exit();
             }
         }

@@ -22,8 +22,9 @@ pub async fn pick_color(
 
     // Popup first, overlay closed after: the window count must never hit
     // zero mid transition. Windows processes the overlay destroy late
-    // enough that the busy flag alone cannot cover the gap.
-    crate::set_busy(&app, true);
+    // enough that the busy flag alone cannot cover the gap. The guard
+    // clears on success and on the error return alike.
+    let _busy = crate::BusyGuard::new(&app);
 
     if let Some(existing) = app.get_webview_window("colorpick") {
         let _ = existing.close();
@@ -39,15 +40,11 @@ pub async fn pick_color(
         .center()
         .focused(true)
         .build()
-        .map_err(|e| {
-            crate::set_busy(&app, false);
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.close();
     }
     let _ = window.set_focus();
-    crate::set_busy(&app, false);
     Ok(())
 }
 
