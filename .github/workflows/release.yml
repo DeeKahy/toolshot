@@ -12,7 +12,17 @@ env:
   RELEASE_BODY: "Downloads for macOS, Linux and Windows. See the README for install notes, macOS needs one Gatekeeper override since the app is unsigned."
 
 jobs:
+  # Gate the whole release on the version string matching the tag in every
+  # file that carries it, so a half-bumped release can never ship.
+  check-versions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify version strings match the tag
+        run: ./scripts/check-versions.sh "${GITHUB_REF_NAME}"
+
   macos:
+    needs: check-versions
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -92,6 +102,7 @@ jobs:
   # an externalBin sidecar, so installers ship both binaries, and the
   # no-argument toolshot-ui entry point hands off to the daemon.
   linux:
+    needs: check-versions
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -149,6 +160,7 @@ jobs:
             target/release/bundle/rpm/*.rpm
 
   windows:
+    needs: check-versions
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
