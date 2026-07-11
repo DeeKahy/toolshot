@@ -15,7 +15,7 @@
         default = toolshot;
         toolshot = pkgs.rustPlatform.buildRustPackage {
           pname = "toolshot";
-          version = "0.2.3";
+          version = "0.3.0";
           src = ./.;
           # Workspace build: the toolshot daemon and the toolshot-ui
           # Tauri app, both installed side by side.
@@ -53,8 +53,8 @@
               <key>CFBundleDisplayName</key><string>Toolshot</string>
               <key>CFBundleIdentifier</key><string>dev.deekahy.toolshot</string>
               <key>CFBundleExecutable</key><string>toolshot</string>
-              <key>CFBundleVersion</key><string>0.2.3</string>
-              <key>CFBundleShortVersionString</key><string>0.2.3</string>
+              <key>CFBundleVersion</key><string>0.3.0</string>
+              <key>CFBundleShortVersionString</key><string>0.3.0</string>
               <key>CFBundleIconFile</key><string>icon.icns</string>
               <key>LSMinimumSystemVersion</key><string>11.0</string>
               <key>LSUIElement</key><true/>

@@ -4,7 +4,7 @@
 
 [package]
 name = "toolshot-daemon"
-version = "0.2.3"
+version = "0.3.0"
 description = "Tiny resident tray and hotkey daemon that spawns the Toolshot UI"
 authors = ["deekahy"]
 license = "GPL-3.0-only"

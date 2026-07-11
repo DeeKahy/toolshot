@@ -1,6 +1,6 @@
 [package]
 name = "toolshot-ui"
-version = "0.2.3"
+version = "0.3.0"
 description = "Toolshot UI sessions: capture overlay, editor, color picker and settings"
 authors = ["deekahy"]
 license = "GPL-3.0-only"
